@@ -1,0 +1,632 @@
+import dayjs from "dayjs";
+import utc from "dayjs/plugin/utc.js";
+import timezone from "dayjs/plugin/timezone.js";
+import cron from "node-cron";
+import { AppDataSource } from "../config/database.js";
+import { orderRepository } from "../repositories/order.repo.js";
+import {
+	TIMEOUT_CONFIG,
+	getTimeoutMs,
+	getTimeoutMinutes,
+} from "../config/timeout.js";
+import logger from "../utils/logger.js";
+
+dayjs.extend(utc);
+dayjs.extend(timezone);
+
+class OrderExpirationService {
+	constructor() {
+		this.isRunning = false;
+		this.cronTask = null;
+		this.EXPIRATION_CHECK_INTERVAL = getTimeoutMs(
+			"ORDER_EXPIRATION_CHECK",
+		);
+		this.EXPIRATION_TIME_MINUTES =
+			getTimeoutMinutes("ORDER_EXPIRATION");
+		this.REORDER_TIMEOUT_MINUTES =
+			getTimeoutMinutes("REORDER_TIMEOUT");
+		// Convert interval to cron expression (every minute)
+		this.cronExpression = "*/1 * * * *"; // Every minute
+	}
+
+	start() {
+		if (this.isRunning) {
+			logger.info(
+				"Order expiration service is already running",
+			);
+			return;
+		}
+
+		logger.orderExpiration(
+			"🕐 Starting order expiration service with cron...",
+		);
+		this.isRunning = true;
+
+		// Run immediately on start
+		this.checkExpiredReorders(); // Check reorders first
+		this.checkExpiredOrders();
+
+		// Schedule with cron (every minute)
+		this.cronTask = cron.schedule(
+			this.cronExpression,
+			() => {
+				this.checkExpiredReorders(); // Check reorders first
+				this.checkExpiredOrders();
+			},
+			{
+				scheduled: true,
+				timezone: "UTC",
+			},
+		);
+
+		logger.orderExpiration(
+			`✅ Order expiration service started successfully (cron: ${this.cronExpression})`,
+		);
+	}
+
+	stop() {
+		if (!this.isRunning) {
+			logger.info(
+				"Order expiration service is not running",
+			);
+			return;
+		}
+
+		logger.orderExpiration(
+			"🛑 Stopping order expiration service...",
+		);
+		this.isRunning = false;
+
+		if (this.cronTask) {
+			this.cronTask.stop();
+			this.cronTask = null;
+		}
+
+		logger.orderExpiration(
+			"✅ Order expiration service stopped successfully",
+		);
+	}
+
+	async checkExpiredOrders() {
+		try {
+			logger.orderExpiration(
+				"🔍 Checking for expired orders...",
+			);
+
+			// Use local time for consistency with database timestamps
+			const now = new Date();
+			const nowMs = now.getTime();
+
+			logger.debug("⏰ Time check details:", {
+				now: now.toISOString(),
+				nowMs: nowMs,
+				expirationMinutes:
+					this.EXPIRATION_TIME_MINUTES,
+			});
+
+			const allPendingOrders =
+				await orderRepository
+					.createQueryBuilder("order")
+					.leftJoinAndSelect("order.user", "user")
+					.where("order.status = :status", {
+						status: "pending",
+					})
+					.andWhere(
+						"order.refundProcessed = :refundProcessed",
+						{
+							refundProcessed: false,
+						},
+					)
+					.andWhere(
+						"order.financialLocked = :financialLocked",
+						{
+							financialLocked: false,
+						},
+					)
+					.andWhere(
+						"(order.message IS NULL OR order.message = '')",
+					)
+					.andWhere(
+						"(order.statusReorder IS NULL OR order.statusReorder != :statusReorder)",
+						{
+							statusReorder: "pending",
+						},
+					)
+					.getMany();
+
+			const expiredOrders =
+				allPendingOrders.filter((order) => {
+					// Database now uses UTC, so we can compare timestamps directly
+					const now = new Date();
+					const orderCreatedAt = new Date(
+						order.createdAt,
+					);
+
+					const orderAgeMs =
+						now.getTime() -
+						orderCreatedAt.getTime();
+					const orderAgeMinutes =
+						orderAgeMs / (60 * 1000);
+
+					// For email orders, also check if message has been received
+					if (
+						order.typeServe === "email" &&
+						order.message &&
+						order.message.trim() !== ""
+					) {
+						return false; // Email order has received message, don't expire
+					}
+
+					// Only expire orders that are older than expiration time (positive age)
+					return (
+						orderAgeMinutes >=
+							this.EXPIRATION_TIME_MINUTES &&
+						orderAgeMinutes >= 0
+					);
+				});
+
+			logger.debug("🔍 All pending orders:", {
+				totalPending: allPendingOrders.length,
+				recentOrders: allPendingOrders.map(
+					(o) => {
+						const now = new Date();
+						const orderCreatedAt = new Date(
+							o.createdAt,
+						);
+						const ageMinutes =
+							(now.getTime() -
+								orderCreatedAt.getTime()) /
+							(60 * 1000);
+						return {
+							id: o.id,
+							publicId: o.publicId,
+							createdAt: o.createdAt,
+							status: o.status,
+							message: o.message,
+							refundProcessed: o.refundProcessed,
+							ageMinutes: ageMinutes.toFixed(2),
+						};
+					},
+				),
+			});
+
+			logger.debug(
+				"🔍 Expired orders query details:",
+				{
+					currentTime: new Date().toISOString(),
+					expirationThreshold: `${this.EXPIRATION_TIME_MINUTES} minutes`,
+					foundOrders: expiredOrders.length,
+					orderIds: expiredOrders.map((o) => {
+						const now = new Date();
+						const orderCreatedAt = new Date(
+							o.createdAt,
+						);
+						const ageMinutes =
+							(now.getTime() -
+								orderCreatedAt.getTime()) /
+							(60 * 1000);
+						return {
+							id: o.id,
+							publicId: o.publicId,
+							createdAt: o.createdAt,
+							ageMinutes: ageMinutes.toFixed(2),
+							status: o.status,
+						};
+					}),
+				},
+			);
+
+			if (expiredOrders.length === 0) {
+				logger.orderExpiration(
+					"✅ No orders need expiration at this time",
+				);
+				return {
+					expiredCount: 0,
+					expiredOrders: [],
+				};
+			}
+
+			logger.orderExpiration(
+				`⏰ Found ${expiredOrders.length} expired order(s) to process`,
+			);
+
+			logger.debug("🔍 Debug info:", {
+				currentTime: new Date().toISOString(),
+				expirationThreshold: `${this.EXPIRATION_TIME_MINUTES} minutes`,
+			});
+
+			const results = [];
+			for (const order of expiredOrders) {
+				const now = new Date();
+				const orderCreatedAt = new Date(
+					order.createdAt,
+				);
+				const orderAgeMinutes =
+					(now.getTime() -
+						orderCreatedAt.getTime()) /
+					(60 * 1000);
+
+				logger.debug(
+					`📋 Order ${order.publicId}:`,
+					{
+						createdAt:
+							orderCreatedAt.toISOString(),
+						age: `${orderAgeMinutes.toFixed(
+							2,
+						)} minutes`,
+						shouldExpire:
+							orderAgeMinutes >=
+							this.EXPIRATION_TIME_MINUTES,
+					},
+				);
+
+				try {
+					const result = await this.expireOrder(
+						order,
+					);
+					results.push(result);
+
+					// Recalculate after expiration for accurate logging
+					const afterExpiration = new Date();
+					const actualDuration =
+						(afterExpiration.getTime() -
+							orderCreatedAt.getTime()) /
+						(60 * 1000);
+
+					logger.orderExpiration(
+						`📧 Expired order ${order.publicId}:`,
+						{
+							orderId: order.id,
+							publicId: order.publicId,
+							createdAt: order.createdAt,
+							now: afterExpiration.toISOString(),
+							timeDifferenceMinutes:
+								actualDuration.toFixed(2),
+							userBalanceBefore:
+								order.user.balance,
+							refundAmount: order.price,
+							userBalanceAfter:
+								order.user.balance + order.price,
+						},
+					);
+				} catch (error) {
+					logger.error(
+						`❌ Failed to expire order ${order.publicId}:`,
+						error,
+					);
+					results.push({
+						orderId: order.id,
+						success: false,
+						error: error.message,
+					});
+				}
+			}
+
+			const successCount = results.filter(
+				(r) =>
+					r &&
+					(r.success === undefined ||
+						r.success === true),
+			).length;
+			logger.orderExpiration(
+				`✅ Successfully expired ${successCount}/${expiredOrders.length} order(s)`,
+			);
+
+			return {
+				expiredCount: successCount,
+				expiredOrders: results,
+			};
+		} catch (error) {
+			logger.error(
+				"❌ Error in order expiration check:",
+				error,
+			);
+			throw error;
+		}
+	}
+
+	async checkExpiredReorders() {
+		try {
+			logger.orderExpiration(
+				"🔍 Checking for expired reorders...",
+			);
+
+			const now = new Date();
+			const {
+				orderReorderRepository,
+				expireReorder,
+			} = await import(
+				"../repositories/orderReorder.repo.js"
+			);
+
+			// Find all pending reorders
+			const pendingReorders =
+				await orderReorderRepository
+					.createQueryBuilder("reorder")
+					.leftJoinAndSelect(
+						"reorder.order",
+						"order",
+					)
+					.where("reorder.status = :status", {
+						status: "pending",
+					})
+					.getMany();
+
+			if (pendingReorders.length === 0) {
+				logger.orderExpiration(
+					"✅ No pending reorders to check",
+				);
+				return {
+					expiredCount: 0,
+					expiredReorders: [],
+				};
+			}
+
+			const expiredReorders =
+				pendingReorders.filter((reorder) => {
+					const reorderCreatedAt = new Date(
+						reorder.createdAt,
+					);
+					const ageMs =
+						now.getTime() -
+						reorderCreatedAt.getTime();
+					const ageMinutes = ageMs / (60 * 1000);
+
+					return (
+						ageMinutes >=
+							this.REORDER_TIMEOUT_MINUTES &&
+						ageMinutes >= 0
+					);
+				});
+
+			if (expiredReorders.length === 0) {
+				logger.orderExpiration(
+					"✅ No reorders need expiration at this time",
+				);
+				return {
+					expiredCount: 0,
+					expiredReorders: [],
+				};
+			}
+
+			logger.orderExpiration(
+				`⏰ Found ${expiredReorders.length} expired reorder(s) to process`,
+			);
+
+			const results = [];
+			for (const reorder of expiredReorders) {
+				const reorderCreatedAt = new Date(
+					reorder.createdAt,
+				);
+				const ageMinutes =
+					(now.getTime() -
+						reorderCreatedAt.getTime()) /
+					(60 * 1000);
+
+				logger.debug(
+					`📋 Reorder ${reorder.id} for order ${reorder.order.publicId}:`,
+					{
+						reorderId: reorder.id,
+						orderId: reorder.order.id,
+						createdAt:
+							reorderCreatedAt.toISOString(),
+						age: `${ageMinutes.toFixed(
+							2,
+						)} minutes`,
+						shouldExpire:
+							ageMinutes >=
+							this.REORDER_TIMEOUT_MINUTES,
+					},
+				);
+
+				try {
+					await expireReorder(
+						reorder.id,
+						reorder.order.id,
+					);
+					results.push({
+						reorderId: reorder.id,
+						orderId: reorder.order.id,
+						success: true,
+					});
+
+					logger.orderExpiration(
+						`📧 Expired reorder ${reorder.id} for order ${reorder.order.publicId}`,
+					);
+				} catch (error) {
+					logger.error(
+						`❌ Failed to expire reorder ${reorder.id}:`,
+						error,
+					);
+					results.push({
+						reorderId: reorder.id,
+						orderId: reorder.order.id,
+						success: false,
+						error: error.message,
+					});
+				}
+			}
+
+			const successCount = results.filter(
+				(r) => r.success === true,
+			).length;
+			logger.orderExpiration(
+				`✅ Successfully expired ${successCount}/${expiredReorders.length} reorder(s)`,
+			);
+
+			return {
+				expiredCount: successCount,
+				expiredReorders: results,
+			};
+		} catch (error) {
+			logger.error(
+				"❌ Error in reorder expiration check:",
+				error,
+			);
+			throw error;
+		}
+	}
+
+	async expireOrder(order) {
+		const now = new Date();
+		const nowMs = now.getTime();
+
+		// For email orders, use updatedAt to support reorders
+		// For SMS orders, use createdAt (original behavior)
+		const relevantTimestamp =
+			order.typeServe === "email"
+				? order.updatedAt || order.createdAt
+				: order.createdAt;
+
+		const orderCreatedAt = new Date(
+			relevantTimestamp,
+		);
+		const timeDifferenceMinutes =
+			(nowMs - orderCreatedAt.getTime()) /
+			(60 * 1000);
+
+		logger.debug(
+			`🔄 Processing expiration for order ${order.publicId}:`,
+			{
+				orderId: order.id,
+				publicId: order.publicId,
+				createdAt: orderCreatedAt.toISOString(),
+				now: now.toISOString(),
+				timeDifferenceMinutes:
+					timeDifferenceMinutes.toFixed(2),
+				expirationThreshold:
+					this.EXPIRATION_TIME_MINUTES,
+				shouldExpire:
+					timeDifferenceMinutes >=
+					this.EXPIRATION_TIME_MINUTES,
+			},
+		);
+
+		try {
+			await AppDataSource.transaction(
+				async (manager) => {
+					logger.debug(
+						`🔄 Updating order ${order.publicId} status to failed...`,
+					);
+
+					const updateResult = await manager
+						.createQueryBuilder()
+						.update("Order")
+						.set({
+							status: "failed",
+							refundProcessed: true,
+							expiredAt: new Date(nowMs),
+							financialLocked: false,
+						})
+						.where("id = :id", { id: order.id })
+						.andWhere("status = :status", {
+							status: "pending",
+						})
+						.andWhere("refundProcessed = :rp", {
+							rp: false,
+						})
+						.andWhere(
+							"financialLocked = :locked",
+							{
+								locked: false,
+							},
+						)
+						.execute();
+
+					logger.debug(
+						`📊 Order update result:`,
+						{
+							orderId: order.id,
+							publicId: order.publicId,
+							affectedRows: updateResult.affected,
+							raw: updateResult.raw,
+						},
+					);
+
+					if (updateResult.affected === 1) {
+						logger.debug(
+							`💰 Processing refund for user ${order.user.id}...`,
+						);
+
+						await manager
+							.createQueryBuilder()
+							.update("User")
+							.set({
+								balance: () => "balance + :price",
+							})
+							.where("id = :id", {
+								id: order.user.id,
+							})
+							.setParameters({
+								price: order.price,
+							})
+							.execute();
+
+						logger.debug(
+							`✅ Refund processed for user ${order.user.id}`,
+						);
+
+						// Increment email availability count back if this is an email order
+						if (
+							order.typeServe === "email" &&
+							order.emailSite
+						) {
+							const { incrementAvailability } =
+								await import(
+									"../repositories/emailPrice.repo.js"
+								);
+							await incrementAvailability(
+								order.emailSite,
+								order.emailDomain || null,
+							);
+							logger.debug(
+								`📈 Incremented email availability for ${
+									order.emailSite
+								}${
+									order.emailDomain
+										? `:${order.emailDomain}`
+										: ""
+								}`,
+							);
+						}
+					} else {
+						logger.warn(
+							`⚠️ Order ${order.publicId} was not updated (affected: ${updateResult.affected})`,
+						);
+					}
+				},
+			);
+
+			logger.orderExpiration(
+				`✅ Order ${order.publicId} marked as failed & refunded`,
+			);
+		} catch (error) {
+			logger.error(
+				`❌ Error expiring order ${order.publicId}:`,
+				error,
+			);
+		}
+	}
+
+	getStatus() {
+		return {
+			isRunning: this.isRunning,
+			checkInterval:
+				this.EXPIRATION_CHECK_INTERVAL,
+			expirationTimeMinutes:
+				this.EXPIRATION_TIME_MINUTES,
+			nextCheck: this.isRunning
+				? "Every 1 minute"
+				: "Not running",
+		};
+	}
+
+	async triggerExpirationCheck() {
+		console.log(
+			"🔧 Manually triggering expiration check...",
+		);
+		return await this.checkExpiredOrders();
+	}
+}
+
+export default new OrderExpirationService();

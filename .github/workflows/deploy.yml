@@ -1,0 +1,465 @@
+name: Build and Deploy Backend to Build Branch
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch: # Allows manual trigger
+
+jobs:
+  build-and-push:
+    name: Build and Push to Build Branch
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: read
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run linter (if available)
+        run: npm run lint || true
+        continue-on-error: true
+
+      - name: Build project
+        run: npm run build
+
+      - name: Verify build contains route
+        run: |
+          echo "🔍 Verifying build contains heleket route..."
+          if [ -f "dist/server.cjs" ]; then
+            if grep -q "payment/heleket" dist/server.cjs; then
+              echo "✅ Route 'payment/heleket' found in built file"
+            else
+              echo "❌ ERROR: Route 'payment/heleket' NOT found in built file!"
+              echo "📁 Checking dist/server.cjs content..."
+              head -100 dist/server.cjs | grep -i "route\|heleket" || echo "No route found in first 100 lines"
+              exit 1
+            fi
+            if grep -q "create-invoice" dist/server.cjs; then
+              echo "✅ Route 'create-invoice' found in built file"
+            else
+              echo "❌ ERROR: Route 'create-invoice' NOT found in built file!"
+              exit 1
+            fi
+            if grep -q "async.*Route\|Route.*async" dist/server.cjs; then
+              echo "✅ Async Route function found in built file"
+            else
+              echo "⚠️ WARNING: Async Route function might not be in built file"
+            fi
+          else
+            echo "❌ ERROR: dist/server.cjs not found after build!"
+            exit 1
+          fi
+
+      - name: Setup Git
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+
+      - name: Checkout build branch
+        uses: actions/checkout@v4
+        with:
+          ref: build
+          path: build-branch
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 1
+
+      - name: Prepare build branch
+        run: |
+          cd build-branch
+          
+          # Remove all files except .git
+          find . -mindepth 1 -maxdepth 1 ! -name '.git' ! -name '.gitignore' -exec rm -rf {} + || true
+          
+          # Copy dist folder contents from main checkout (workspace root)
+          if [ -d "../dist" ]; then
+            # Copy all files from dist to root
+            cp -r ../dist/* . 2>/dev/null || true
+            # If server.cjs is in dist subdirectory, also copy it to root
+            if [ -f "../dist/server.cjs" ]; then
+              cp ../dist/server.cjs . || true
+              echo "✅ Copied server.cjs from dist to root"
+            fi
+            # If there's a dist subdirectory after copy, move server.cjs to root
+            if [ -f "dist/server.cjs" ]; then
+              cp dist/server.cjs . || true
+              echo "✅ Copied server.cjs from dist subdirectory to root"
+            fi
+            echo "✅ Copied dist files"
+            echo "📁 Files after copy:"
+            ls -la
+          else
+            echo "❌ Error: dist folder not found!"
+            echo "📁 Contents of parent directory:"
+            ls -la ..
+            exit 1
+          fi
+          
+          # Copy package.json and package-lock.json for production dependencies
+          if [ -f "../package.json" ]; then
+            cp ../package.json . || true
+            echo "✅ Copied package.json"
+          fi
+          
+          if [ -f "../package-lock.json" ]; then
+            cp ../package-lock.json . || true
+            echo "✅ Copied package-lock.json"
+          fi
+          
+          # Create README
+          cat > README.md << 'EOF'
+          # Build Files
+          
+          This branch contains only the built files for deployment.
+          Source code is in the 'main' branch.
+          
+          **Do not edit this branch manually!**
+          This branch is automatically updated by GitHub Actions.
+          EOF
+          
+          # Create minimal .gitignore
+          echo "# Build branch - keep all files" > .gitignore
+
+      - name: Commit and push to build branch
+        run: |
+          cd build-branch
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git add -A
+          if git diff --staged --quiet; then
+            echo "ℹ️ No changes to commit"
+          else
+            git commit -m "Build: Deploy from main (${{ github.sha }}) [skip ci]"
+            git push origin build
+            echo "✅ Pushed to build branch"
+          fi
+
+  deploy-to-server:
+    name: Deploy Build to Server
+    needs: build-and-push
+    if: needs.build-and-push.result == 'success' # Only run if build-and-push succeeded
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout build branch
+        uses: actions/checkout@v4
+        with:
+          ref: build
+          fetch-depth: 1
+
+      - name: Verify build files exist
+        run: |
+          echo "📁 Checking for build files..."
+          echo "Current directory: $(pwd)"
+          echo "Files in current directory:"
+          ls -la
+          echo ""
+          echo "Searching for server.cjs:"
+          find . -name "server.cjs" -type f 2>/dev/null || echo "server.cjs not found"
+          echo ""
+          echo "Searching for package.json:"
+          find . -name "package.json" -type f 2>/dev/null || echo "package.json not found"
+          echo ""
+          # Check if files exist (either in root or dist)
+          if [ ! -f "server.cjs" ] && [ ! -f "dist/server.cjs" ] && [ ! -f "./server.cjs" ]; then
+            echo "❌ Error: server.cjs not found!"
+            echo "Available files:"
+            find . -type f | head -20
+            exit 1
+          fi
+          if [ ! -f "package.json" ] && [ ! -f "./package.json" ]; then
+            echo "❌ Error: package.json not found!"
+            exit 1
+          fi
+          echo "✅ Build files verified"
+
+      - name: Prepare server and backup
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          password: ${{ secrets.SERVER_PASSWORD }}
+          port: ${{ secrets.SERVER_PORT || 22 }}
+          timeout: 120s
+          command_timeout: 90s
+          script: |
+            set -e  # Exit on error
+            set -x  # Debug mode
+            
+            # Create deployment directory if it doesn't exist
+            DEPLOY_PATH="${{ secrets.DEPLOY_PATH || '/root/SMS4U' }}"
+            echo "📁 Deployment path: $DEPLOY_PATH"
+            
+            # Create directory with proper permissions
+            mkdir -p $DEPLOY_PATH || {
+              echo "❌ Failed to create directory: $DEPLOY_PATH"
+              exit 1
+            }
+            echo "✅ Directory created/verified: $DEPLOY_PATH"
+            
+            # Set proper permissions
+            chmod -R 755 $DEPLOY_PATH || true
+            echo "✅ Permissions set"
+            
+            # Backup current deployment if exists and has content
+            if [ -d "$DEPLOY_PATH" ] && [ "$(ls -A $DEPLOY_PATH 2>/dev/null)" ]; then
+              BACKUP_DIR="$DEPLOY_PATH.backup.$(date +%Y%m%d_%H%M%S)"
+              echo "📦 Creating backup: $BACKUP_DIR"
+              cp -r $DEPLOY_PATH $BACKUP_DIR || {
+                echo "⚠️ Backup failed, continuing anyway..."
+              }
+              echo "✅ Backup created: $BACKUP_DIR"
+            else
+              echo "ℹ️ No existing deployment to backup"
+            fi
+            
+            # Remove old backups (keep last 3)
+            cd $(dirname $DEPLOY_PATH) || {
+              echo "⚠️ Failed to change directory, skipping backup cleanup"
+              exit 0
+            }
+            ls -dt $DEPLOY_PATH.backup.* 2>/dev/null | tail -n +4 | xargs rm -rf 2>/dev/null || true
+            echo "✅ Old backups cleaned up (kept last 3)"
+            
+            echo "✅ Server preparation completed"
+
+      - name: List files before SCP
+        run: |
+          echo "📁 Files in workspace before SCP:"
+          ls -la
+          echo ""
+          echo "📁 All files recursively:"
+          find . -type f -not -path './.git/*' | head -20
+          echo ""
+          echo "📁 Checking for specific files:"
+          [ -f "server.cjs" ] && echo "✅ server.cjs exists" || echo "❌ server.cjs NOT found"
+          [ -f "dist/server.cjs" ] && echo "✅ dist/server.cjs exists" || echo "❌ dist/server.cjs NOT found"
+          [ -f "package.json" ] && echo "✅ package.json exists" || echo "❌ package.json NOT found"
+
+      - name: Deploy to server via SCP
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          password: ${{ secrets.SERVER_PASSWORD }}
+          port: ${{ secrets.SERVER_PORT || 22 }}
+          timeout: 300s
+          command_timeout: 120s
+          source: "*"
+          target: ${{ secrets.DEPLOY_PATH || '/root/SMS4U' }}
+          strip_components: 0
+          rm: false
+          overwrite: true
+          exclude: ".git"
+
+      - name: Install dependencies and restart service
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          password: ${{ secrets.SERVER_PASSWORD }}
+          port: ${{ secrets.SERVER_PORT || 22 }}
+          timeout: 300s
+          command_timeout: 180s
+          script: |
+            set -e  # Exit on error
+            set -x  # Debug mode
+            
+            DEPLOY_PATH="${{ secrets.DEPLOY_PATH || '/root/SMS4U' }}"
+            echo "📁 Deployment path: $DEPLOY_PATH"
+            
+            # Verify directory exists
+            if [ ! -d "$DEPLOY_PATH" ]; then
+              echo "❌ Error: Deployment directory does not exist: $DEPLOY_PATH"
+              exit 1
+            fi
+            
+            cd $DEPLOY_PATH || {
+              echo "❌ Error: Failed to change to deployment directory"
+              exit 1
+            }
+            
+            echo "✅ Changed to deployment directory"
+            
+            # Fix Git ownership issue
+            git config --global --add safe.directory $DEPLOY_PATH || true
+            
+            # Set proper permissions
+            chmod -R 755 $DEPLOY_PATH
+            
+            # Load nvm if exists (common on servers)
+            export NVM_DIR="$HOME/.nvm"
+            if [ -s "$NVM_DIR/nvm.sh" ]; then
+              echo "📦 Loading nvm..."
+              \. "$NVM_DIR/nvm.sh"
+            fi
+            
+            # Also try loading from /root/.nvm
+            if [ -s "/root/.nvm/nvm.sh" ]; then
+              echo "📦 Loading nvm from /root/.nvm..."
+              export NVM_DIR="/root/.nvm"
+              \. "$NVM_DIR/nvm.sh"
+            fi
+            
+            # Add common Node.js paths to PATH
+            export PATH="$PATH:/usr/local/bin:/usr/bin:/opt/node/bin:$HOME/.local/bin"
+            
+            # Verify npm is available
+            if ! command -v npm &> /dev/null; then
+              echo "❌ Error: npm command not found!"
+              echo "📋 Checking Node.js installation..."
+              echo "Node.js path: $(which node 2>/dev/null || command -v node 2>/dev/null || echo 'not found')"
+              echo "Current PATH: $PATH"
+              echo "📋 Trying to find npm..."
+              find /usr -name npm 2>/dev/null | head -3 || true
+              find /opt -name npm 2>/dev/null | head -3 || true
+              find $HOME -name npm 2>/dev/null | head -3 || true
+              exit 1
+            fi
+            
+            echo "✅ Found npm: $(which npm)"
+            echo "✅ npm version: $(npm --version)"
+            
+            # Install/update dependencies (production only)
+            echo "📦 Installing dependencies..."
+            npm ci --production || npm install --production || {
+              echo "⚠️ npm install failed!"
+              exit 1
+            }
+            echo "✅ Dependencies installed"
+            
+            # Check if PM2 is installed and restart the app
+            if command -v pm2 &> /dev/null; then
+              echo "🔄 Restarting with PM2..."
+              echo "📋 Current PM2 processes:"
+              pm2 list || true
+              
+              # Check if server.cjs exists
+              if [ -f "server.cjs" ]; then
+                SERVER_FILE="server.cjs"
+              elif [ -f "dist/server.cjs" ]; then
+                SERVER_FILE="dist/server.cjs"
+              else
+                echo "❌ Error: server.cjs not found!"
+                ls -la
+                exit 1
+              fi
+              
+              echo "📁 Using server file: $SERVER_FILE"
+              
+              # Try to restart by app name (check for both possible names)
+              PM2_NAME="fastify-js"
+              if pm2 list | grep -q "fastify-js"; then
+                echo "🔄 Stopping existing PM2 process (fastify-js)..."
+                pm2 stop fastify-js || true
+                sleep 2
+                echo "🔄 Deleting existing PM2 process to ensure fresh start..."
+                pm2 delete fastify-js 2>/dev/null || true
+                sleep 1
+                echo "🆕 Starting fresh PM2 process with latest code..."
+                pm2 start $SERVER_FILE --name "fastify-js" --update-env
+              elif pm2 list | grep -q "api.sms4u-BackEnd"; then
+                echo "🔄 Stopping existing PM2 process (api.sms4u-BackEnd)..."
+                pm2 stop api.sms4u-BackEnd || true
+                sleep 2
+                echo "🔄 Deleting existing PM2 process to ensure fresh start..."
+                pm2 delete api.sms4u-BackEnd 2>/dev/null || true
+                sleep 1
+                echo "🆕 Starting fresh PM2 process with latest code..."
+                pm2 start $SERVER_FILE --name "fastify-js" --update-env
+              else
+                echo "🆕 Starting new PM2 process: fastify-js"
+                pm2 start $SERVER_FILE --name "fastify-js" --update-env
+              fi
+              
+              # Save PM2 configuration
+              pm2 save || true
+              echo "✅ PM2 process restarted"
+            else
+              echo "⚠️ PM2 not found, checking for systemd service..."
+              
+              # Check for systemd service
+              if systemctl list-units --type=service | grep -q "sms-api"; then
+                echo "🔄 Restarting systemd service..."
+                sudo systemctl restart sms-api || sudo systemctl restart api.sms4u-BackEnd || true
+                echo "✅ Systemd service restarted"
+              else
+                echo "⚠️ No PM2 or systemd service found"
+                echo "ℹ️ Please restart the service manually"
+              fi
+            fi
+            
+            # Wait a moment for service to start
+            sleep 5
+            
+            # Check if service is running
+            if command -v pm2 &> /dev/null; then
+              echo "📋 PM2 processes after restart:"
+              pm2 list
+              echo ""
+              echo "📊 PM2 logs (last 20 lines):"
+              pm2 logs fastify-js --lines 20 --nostream || pm2 logs api.sms4u-BackEnd --lines 20 --nostream || true
+            fi
+            
+            # Verify server.cjs contains the route
+            echo ""
+            echo "🔍 Verifying route in server.cjs..."
+            if grep -q "payment/heleket" server.cjs 2>/dev/null || grep -q "payment/heleket" dist/server.cjs 2>/dev/null; then
+              echo "✅ Route 'payment/heleket' found in server.cjs"
+            else
+              echo "⚠️ Warning: Route 'payment/heleket' not found in server.cjs"
+              echo "📁 Checking server.cjs content..."
+              head -50 server.cjs 2>/dev/null | grep -i "route\|heleket" || true
+            fi
+            
+            # Verify create-invoice route exists
+            echo ""
+            echo "🔍 Verifying 'create-invoice' route..."
+            if grep -q "create-invoice" server.cjs 2>/dev/null || grep -q "create-invoice" dist/server.cjs 2>/dev/null; then
+              echo "✅ Route 'create-invoice' found in server.cjs"
+            else
+              echo "⚠️ Warning: Route 'create-invoice' not found in server.cjs"
+            fi
+            
+            # Verify async Route function
+            echo ""
+            echo "🔍 Verifying async Route function..."
+            if grep -q "async.*Route\|Route.*async" server.cjs 2>/dev/null || grep -q "async.*Route\|Route.*async" dist/server.cjs 2>/dev/null; then
+              echo "✅ Async Route function found"
+            else
+              echo "⚠️ Warning: Async Route function might not be present"
+            fi
+            
+            # Force PM2 to reload (not just restart) to ensure new code is loaded
+            if command -v pm2 &> /dev/null; then
+              echo ""
+              echo "🔄 Force reloading PM2 to ensure new code is loaded..."
+              pm2 reload fastify-js --update-env || pm2 restart fastify-js --update-env || pm2 reload api.sms4u-BackEnd --update-env || pm2 restart api.sms4u-BackEnd --update-env
+              sleep 3
+              echo "✅ PM2 reloaded"
+            fi
+            
+            echo "✅ Deployment completed on server"
+            exit 0
+
+      - name: Deployment Success
+        run: |
+          echo "✅ Deployment completed successfully!"
+          echo "🌐 Server: ${{ secrets.SERVER_HOST }}"
+          echo "📁 Path: ${{ secrets.DEPLOY_PATH || '/root/SMS4U' }}"
+          echo "🌿 Build Branch: build"
+

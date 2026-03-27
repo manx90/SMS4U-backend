@@ -1,0 +1,38 @@
+{
+	"name": "sms",
+	"version": "1.0.0",
+	"main": "index.js",
+	"type": "module",
+	"scripts": {
+		"dev": "nodemon src/server.js",
+		"build": "node build.js",
+		"start": "node dist/server.cjs"
+	},
+	"author": "",
+	"license": "ISC",
+	"description": "",
+	"dependencies": {
+		"@fastify/caching": "^9.0.3",
+		"@fastify/compress": "^8.1.0",
+		"@fastify/cors": "^11.1.0",
+		"@fastify/jwt": "^10.0.0",
+		"axios": "^1.12.2",
+		"bcrypt": "^6.0.0",
+		"cluster": "^0.7.7",
+		"dayjs": "^1.11.18",
+		"express": "^4.18.2",
+		"fastify": "^5.6.0",
+		"html-entities": "^2.6.0",
+		"jsonwebtoken": "^9.0.2",
+		"lru-cache": "^10.4.3",
+		"mysql2": "^3.14.5",
+		"node-cron": "^4.2.1",
+		"typeorm": "^0.3.26",
+		"yaml": "^2.3.4"
+	},
+	"devDependencies": {
+		"esbuild": "^0.27.0",
+		"nodemon": "^3.1.10",
+		"ts-node": "^10.9.2"
+	}
+}
