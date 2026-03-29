@@ -10,10 +10,7 @@ import {
 	replaceSnapshotsForService,
 	findOperatorsForCountry,
 } from "../repositories/provider3Access.repo.js";
-import {
-	getOne as getCountryById,
-	getByCodeCountry,
-} from "../repositories/country.repo.js";
+import { resolveCountryFilterForProvider3 } from "../utils/provider3Country.js";
 import thirdNumberServices from "../api/third-Number.service.js";
 import Provider3AccessSync from "../services/Provider3AccessSync.js";
 import {
@@ -329,11 +326,8 @@ export const druServiceRoute = async (
 		preHandler: requireUser(),
 		handler: async (req, res) => {
 			try {
-				const {
-					serviceCode,
-					country,
-					interval = "30min",
-				} = req.query;
+				const { serviceCode, country, interval } =
+					req.query;
 				if (!serviceCode || !country) {
 					return res.status(400).send({
 						state: "400",
@@ -341,33 +335,32 @@ export const druServiceRoute = async (
 							"serviceCode and country are required",
 					});
 				}
-				let countryFilter = String(country).trim();
-				if (/^\d+$/.test(countryFilter)) {
-					let cRow = await getCountryById(
-						parseInt(countryFilter, 10),
+				const snapshotInterval =
+					interval != null &&
+					String(interval).trim() !== ""
+						? String(interval).trim()
+						: process.env
+								.PROVIDER3_ACCESS_INFO_INTERVAL ||
+							"30min";
+				const countryFilter =
+					await resolveCountryFilterForProvider3(
+						country,
 					);
-					if (!cRow) {
-						cRow = await getByCodeCountry(
-							countryFilter,
-						);
-					}
-					if (cRow) {
-						const p3 = cRow.provider3?.trim();
-						if (p3) countryFilter = p3;
-						else if (cRow.code_country?.trim()) {
-							countryFilter =
-								cRow.code_country.trim();
-						}
-					}
-				}
 				const list = await findOperatorsForCountry(
 					String(serviceCode),
-					String(interval),
+					snapshotInterval,
 					countryFilter,
 				);
+				const isAdmin = req.user?.role === "admin";
+				const data = isAdmin
+					? list
+					: list.map((_, i) => ({
+							label: `Server ${i + 1}`,
+							index: i + 1,
+						}));
 				return res.send({
 					state: "200",
-					data: list,
+					data,
 				});
 			} catch (e) {
 				return res.status(500).send({

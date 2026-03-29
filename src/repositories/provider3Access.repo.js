@@ -55,6 +55,21 @@ export const findByServiceAndInterval = async (
 };
 
 /**
+ * Stable order so "Server N" / query param `server` always maps to the same row.
+ */
+function sortOperatorRows(rows) {
+	return [...rows].sort((a, b) => {
+		const ca = String(a.ccode || "").localeCompare(
+			String(b.ccode || ""),
+		);
+		if (ca !== 0) return ca;
+		return String(a.operator || "").localeCompare(
+			String(b.operator || ""),
+		);
+	});
+}
+
+/**
  * @param {string} countryParam - ISO ccode (IT), partial country name, or resolved provider3 from country id (see service.route)
  */
 export const findOperatorsForCountry = async (
@@ -67,24 +82,59 @@ export const findOperatorsForCountry = async (
 		interval,
 	);
 	const q = String(countryParam || "").trim();
-	if (!q) return rows;
+	let filtered = rows;
+	if (q) {
+		const upper = q.toUpperCase();
+		filtered = rows.filter((r) => {
+			if (
+				r.ccode &&
+				r.ccode.toUpperCase() === upper
+			) {
+				return true;
+			}
+			if (
+				r.countryName &&
+				r.countryName
+					.toLowerCase()
+					.includes(q.toLowerCase())
+			) {
+				return true;
+			}
+			return false;
+		});
+	}
+	return sortOperatorRows(filtered);
+};
 
-	const upper = q.toUpperCase();
-	return rows.filter((r) => {
-		if (
-			r.ccode &&
-			r.ccode.toUpperCase() === upper
-		) {
-			return true;
-		}
-		if (
-			r.countryName &&
-			r.countryName
-				.toLowerCase()
-				.includes(q.toLowerCase())
-		) {
-			return true;
-		}
-		return false;
-	});
+/**
+ * Resolve 1-based index to real operator id for Provider 3 API (same list as findOperatorsForCountry).
+ */
+export const resolveOperatorByIndex = async (
+	serviceCode,
+	interval,
+	countryParam,
+	index1Based,
+) => {
+	const list = await findOperatorsForCountry(
+		serviceCode,
+		interval,
+		countryParam,
+	);
+	const n = parseInt(String(index1Based), 10);
+	if (
+		!Number.isFinite(n) ||
+		n < 1 ||
+		n > list.length
+	) {
+		throw new Error(
+			list.length === 0
+				? "No operators available for this country and service (run access sync)"
+				: `Invalid operator index (use 1–${list.length})`,
+		);
+	}
+	const op = String(list[n - 1].operator || "").trim();
+	if (!op) {
+		throw new Error("Operator entry is empty");
+	}
+	return op;
 };
