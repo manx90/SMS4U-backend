@@ -1,3 +1,4 @@
+import { Brackets } from "typeorm";
 import { AppDataSource } from "../config/database.js";
 import CountryServicePricingModel from "../models/CountryServicePricing.model.js";
 import Country from "../models/Country.model.js";
@@ -9,32 +10,81 @@ export const countryServicePricingRepository =
 		CountryServicePricingModel,
 	);
 
+/**
+ * Strip LIKE wildcards so user input cannot broaden matches unintentionally.
+ */
+function sanitizeSearchInput(raw) {
+	if (raw == null || typeof raw !== "string") return "";
+	return raw.trim().replace(/[%_]/g, "");
+}
+
+function applyPricingSearchFilter(qb, search) {
+	const term = sanitizeSearchInput(search);
+	if (!term) return;
+
+	const pattern = `%${term}%`;
+	qb.andWhere(
+		new Brackets((sub) => {
+			sub
+				.where("country.name LIKE :pattern", {
+					pattern,
+				})
+				.orWhere("country.code_country LIKE :pattern", {
+					pattern,
+				})
+				.orWhere("service.name LIKE :pattern", {
+					pattern,
+				})
+				.orWhere("service.code LIKE :pattern", {
+					pattern,
+				})
+				.orWhere("CAST(csp.provider1 AS CHAR) LIKE :pattern", {
+					pattern,
+				})
+				.orWhere("CAST(csp.provider2 AS CHAR) LIKE :pattern", {
+					pattern,
+				})
+				.orWhere("CAST(csp.provider3 AS CHAR) LIKE :pattern", {
+					pattern,
+				});
+		}),
+	);
+}
+
 // CRUD operations
-export const getAll = async (page = 1, limit = 50) => {
+export const getAll = async (
+	page = 1,
+	limit = 50,
+	search = "",
+) => {
 	// Convert to numbers and ensure they are positive
 	const pageNum = Math.max(1, parseInt(page) || 1);
 	const limitNum = Math.max(1, Math.min(100, parseInt(limit) || 50)); // Max 100 items per page
 	const skip = (pageNum - 1) * limitNum;
 
-	// Don't use cache for paginated requests as cache key would be different for each page
-	const data = await countryServicePricingRepository.find({
-		relations: {
-			country: true,
-			service: true,
-		},
-		skip: skip,
-		take: limitNum,
-		order: {
-			id: "ASC", // Order by ID for consistent pagination
-		},
-	});
+	const qb = countryServicePricingRepository
+		.createQueryBuilder("csp")
+		.leftJoinAndSelect("csp.country", "country")
+		.leftJoinAndSelect("csp.service", "service")
+		.orderBy("csp.id", "ASC")
+		.skip(skip)
+		.take(limitNum);
 
-	return data;
+	applyPricingSearchFilter(qb, search);
+
+	return qb.getMany();
 };
 
-// Get total count of pricing records
-export const getCount = async () => {
-	return await countryServicePricingRepository.count();
+// Get total count of pricing records (optionally filtered)
+export const getCount = async (search = "") => {
+	const qb = countryServicePricingRepository
+		.createQueryBuilder("csp")
+		.leftJoin("csp.country", "country")
+		.leftJoin("csp.service", "service");
+
+	applyPricingSearchFilter(qb, search);
+
+	return qb.getCount();
 };
 
 export const getOne = async (id) =>

@@ -15,6 +15,7 @@ import {
 	getByCodeCountry,
 } from "../repositories/country.repo.js";
 import thirdNumberServices from "../api/third-Number.service.js";
+import Provider3AccessSync from "../services/Provider3AccessSync.js";
 import {
 	requireApiKey,
 	requireAdmin,
@@ -267,6 +268,57 @@ export const druServiceRoute = async (
 				return res.status(400).send({
 					state: "400",
 					error: e.message,
+				});
+			}
+		},
+	});
+
+	// Provider 3: run full access sync (same as cron) — all services with provider3 set
+	app.get("/provider3/access-sync-all", {
+		preHandler: requireAdmin(),
+		handler: async (req, res) => {
+			try {
+				const result =
+					await Provider3AccessSync.syncAll({
+						ignoreDisabled: true,
+					});
+
+				if (
+					result.reason === "missing_third_env"
+				) {
+					return res.status(400).send({
+						state: "400",
+						error:
+							"Third provider API is not configured (third_NUMBER_API_KEY / third_NUMBER_API_URL)",
+						data: result,
+					});
+				}
+
+				if (
+					result.reason === "already_running"
+				) {
+					return res.status(409).send({
+						state: "409",
+						error:
+							"A sync is already in progress. Try again shortly.",
+						data: result,
+					});
+				}
+
+				return res.send({
+					state: "200",
+					msg: result.skipped
+						? "No provider3 services to sync"
+						: "ok",
+					data: result,
+				});
+			} catch (e) {
+				console.error(e);
+				return res.status(500).send({
+					state: "500",
+					error:
+						e.message ||
+						"Provider 3 full sync failed",
 				});
 			}
 		},

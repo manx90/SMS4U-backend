@@ -38,10 +38,15 @@ export const countryServicePricingRoute = (
 					Math.min(100, limit),
 				);
 
-				// Get paginated data and total count
+				const search =
+					typeof request.query.search === "string"
+						? request.query.search
+						: "";
+
+				// Get paginated data and total count (same search filter for both)
 				const [data, total] = await Promise.all([
-					getAll(page, limit),
-					getCount(),
+					getAll(page, effectiveLimit, search),
+					getCount(search),
 				]);
 
 				// Use effective page size — client may send limit=1000 but repo only returns 100 rows/page

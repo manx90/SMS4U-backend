@@ -83,12 +83,48 @@ class Provider3AccessSync {
 		}
 	}
 
-	async syncAll() {
+	/**
+	 * Same job as the cron: refresh /accessinfo snapshots for every service with provider3 set.
+	 * @param {{ ignoreDisabled?: boolean }} options — admin manual run may pass ignoreDisabled: true to run even when PROVIDER3_ACCESS_SYNC_ENABLED=false
+	 * @returns {Promise<{ ok: number; failed: number; skipped?: boolean; reason?: string }>}
+	 */
+	async syncAll(options = {}) {
+		const ignoreDisabled = options.ignoreDisabled === true;
+
+		if (!ignoreDisabled && !this.isEnabled) {
+			console.log(
+				"⏸️  Provider3 access sync skipped (cron disabled)",
+			);
+			return {
+				ok: 0,
+				failed: 0,
+				skipped: true,
+				reason: "sync_disabled",
+			};
+		}
+
+		if (
+			!process.env.third_NUMBER_API_KEY ||
+			!process.env.third_NUMBER_API_URL
+		) {
+			return {
+				ok: 0,
+				failed: 0,
+				skipped: true,
+				reason: "missing_third_env",
+			};
+		}
+
 		if (this.isSyncing) {
 			console.log(
 				"⏳ Provider3 access sync already running, skipping...",
 			);
-			return;
+			return {
+				ok: 0,
+				failed: 0,
+				skipped: true,
+				reason: "already_running",
+			};
 		}
 		this.isSyncing = true;
 
@@ -106,7 +142,12 @@ class Provider3AccessSync {
 				console.log(
 					"📭 Provider3 access sync: no services with provider3 field set",
 				);
-				return;
+				return {
+					ok: 0,
+					failed: 0,
+					skipped: true,
+					reason: "no_provider3_services",
+				};
 			}
 
 			let ok = 0;
@@ -148,6 +189,7 @@ class Provider3AccessSync {
 			console.log(
 				`📊 Provider3 access sync done: ${ok} ok, ${failed} failed`,
 			);
+			return { ok, failed };
 		} finally {
 			this.isSyncing = false;
 		}
