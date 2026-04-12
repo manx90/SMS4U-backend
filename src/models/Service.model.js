@@ -28,12 +28,6 @@ const Service = new EntitySchema({
 			type: "varchar",
 			length: 255,
 		},
-		/** Service name for provider 3 accessinfo / API (e.g. WhatsApp) */
-		provider3: {
-			type: "varchar",
-			length: 255,
-			nullable: true,
-		},
 	},
 	relations: {
 		orders: {

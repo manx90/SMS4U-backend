@@ -13,6 +13,7 @@ import {
 } from "./routes/user.js";
 import BackgroundService from "./services/BackgroundService.js";
 import { setupDefaultAdmin } from "./script/admin-config.js";
+import { preTypeormMigrateProvider3 } from "./script/preTypeormMigrateProvider3.js";
 import cors from "@fastify/cors";
 dotenv.config();
 const app = Fastify({ logger: false });
@@ -158,6 +159,8 @@ async function startServer() {
 			credentials: true,
 		});
 
+		await preTypeormMigrateProvider3();
+
 		// Initialize database first
 		await AppDataSource.initialize();
 		console.log(
@@ -234,7 +237,8 @@ if (isPrimary && shouldUseCluster) {
 	);
 
 	// Initialize database and start background services in primary process
-	AppDataSource.initialize()
+	preTypeormMigrateProvider3()
+		.then(() => AppDataSource.initialize())
 		.then(async () => {
 			console.log(
 				"✅ Database connection established in primary process",

@@ -2,6 +2,15 @@ import { DataSource } from "typeorm";
 import { entities } from "../models/index.js";
 import dotenv from "dotenv";
 dotenv.config();
+
+const poolSize = Math.min(
+	100,
+	Math.max(
+		5,
+		parseInt(process.env.DB_POOL_SIZE, 10) || 25,
+	),
+);
+
 export const createDataSource = () => {
 	return new DataSource({
 		type: "mysql",
@@ -15,6 +24,15 @@ export const createDataSource = () => {
 		logging: false,
 		entities: entities,
 		subscribers: ["./src/subscribers/*.js"],
+		poolSize,
+		connectTimeout:
+			parseInt(process.env.DB_CONNECT_TIMEOUT_MS, 10) || 30000,
+		acquireTimeout:
+			parseInt(process.env.DB_ACQUIRE_TIMEOUT_MS, 10) || 60000,
+		extra: {
+			waitForConnections: true,
+			queueLimit: 0,
+		},
 	});
 };
 

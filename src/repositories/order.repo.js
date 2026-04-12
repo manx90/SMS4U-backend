@@ -7,6 +7,7 @@ import { userRepository } from "./user.repo.js";
 import { serviceRepository } from "./service.repo.js";
 import { countryRepository } from "./country.repo.js";
 import { getByCountryAndService } from "./countryServicePricing.repo.js";
+import { getByCountryAndService as getP3Config } from "./provider3CountryService.repo.js";
 import { balanceChange } from "./user.repo.js";
 import CacheService from "../services/CacheService.js";
 export const orderRepository =
@@ -128,74 +129,46 @@ export const getEmailOrderForUser = async (
 	return order;
 };
 
-export const create = async (
+export const createProvider3Order = async (
 	apiKey,
 	countryParam,
 	serviceParam,
-	provider = "second",
-	operatorForThird = null,
+	operatorForThird,
 ) => {
 	try {
-		const providerNum =
-			provider === "first"
-				? 1
-				: provider === "third"
-					? 3
-					: 2;
-		const { user, service, country, pricing } =
-			await resolveUserCountryService(
+		const { user, service, country, cfg, price } =
+			await resolveUserCountryServiceP3(
 				apiKey,
 				countryParam,
 				serviceParam,
-				providerNum,
 			);
 
-		// Check balance BEFORE requesting number from provider
-		// This prevents wasting provider numbers when balance is insufficient
-		// The atomic check in transaction below still prevents race conditions
-		await checkBalanceDiff(user, pricing);
-
-		let number;
-		if (provider === "first") {
-			number = await firstNumberServices.getMobileNumber(
-				country.provider1,
-				service.provider1,
+		if (
+			operatorForThird == null ||
+			String(operatorForThird).trim() === ""
+		) {
+			throw new Error(
+				"operator is required for provider 3",
 			);
-		} else if (provider === "third") {
-			if (
-				operatorForThird == null ||
-				String(operatorForThird).trim() === ""
-			) {
-				throw new Error(
-					"operator is required for provider 3",
-				);
-			}
-			const ccode = country.provider3;
-			if (!ccode || String(ccode).trim() === "") {
-				throw new Error(
-					"Country is not configured for provider 3 (missing provider3 country code)",
-				);
-			}
-			number = await thirdNumberServices.getMobileNumber(
+		}
+
+		const ccode = cfg.upstreamCountryCode;
+		if (!ccode || String(ccode).trim() === "") {
+			throw new Error(
+				"Provider 3 is not configured for this country and service",
+			);
+		}
+
+		await checkBalanceDiff(user, { price });
+
+		const number =
+			await thirdNumberServices.getMobileNumber(
 				String(ccode).trim(),
 				String(operatorForThird).trim(),
 				1,
 			);
-		} else {
-			number = await secondNumberServices.getMobileNumber(
-				country.provider2,
-				service.provider2,
-			);
-		}
 
-		const price = pricing?.price;
-
-		const providerId =
-			provider === "first"
-				? 1
-				: provider === "third"
-					? 3
-					: 2;
+		const providerId = 3;
 
 		// Create order and atomically deduct balance inside a single transaction
 		let savedOrder = null;
@@ -246,9 +219,95 @@ export const create = async (
 		};
 	}
 };
+
+export const create = async (
+	apiKey,
+	countryParam,
+	serviceParam,
+	provider = "second",
+) => {
+	try {
+		const providerNum = provider === "first" ? 1 : 2;
+		const { user, service, country, pricing } =
+			await resolveUserCountryService(
+				apiKey,
+				countryParam,
+				serviceParam,
+				providerNum,
+			);
+
+		await checkBalanceDiff(user, pricing);
+
+		let number;
+		if (provider === "first") {
+			number = await firstNumberServices.getMobileNumber(
+				country.provider1,
+				service.provider1,
+			);
+		} else {
+			number = await secondNumberServices.getMobileNumber(
+				country.provider2,
+				service.provider2,
+			);
+		}
+
+		const price = pricing?.price;
+
+		const providerId = provider === "first" ? 1 : 2;
+
+		let savedOrder = null;
+		await AppDataSource.transaction(
+			async (manager) => {
+				const debitResult = await manager
+					.createQueryBuilder()
+					.update("User")
+					.set({
+						balance: () => "balance - :price",
+					})
+					.where("id = :id", { id: user.id })
+					.andWhere("balance >= :price", {
+						price,
+					})
+					.execute();
+				if (!debitResult?.affected) {
+					throw new Error(
+						"Your balance is insufficient for this purchase",
+					);
+				}
+
+				const orderRepoTx =
+					manager.getRepository(OrderModel);
+				const orderEntity = orderRepoTx.create({
+					user,
+					service,
+					country: country,
+					price,
+					typeServe: "number",
+					status: "pending",
+					number,
+					provider: providerId,
+					publicId: generatePublicOrderId(),
+				});
+				savedOrder = await orderRepoTx.save(
+					orderEntity,
+				);
+			},
+		);
+
+		return savedOrder;
+	} catch (e) {
+		throw {
+			success: false,
+			message: e.message,
+		};
+	}
+};
+
 export const update = async (id, data) => {
-	const order = await getOne(id);
-	if (!order) throw new Error("Order not found");
+	const exists = await orderRepository.exist({
+		where: { id },
+	});
+	if (!exists) throw new Error("Order not found");
 	await orderRepository.update(id, data);
 };
 export const remove = async (id) => {
@@ -342,20 +401,9 @@ const resolveUserCountryService = async (
 		);
 	}
 
-	// Get the correct price based on provider
 	let price;
 	if (provider === 1) {
 		price = pricing.provider1;
-	} else if (provider === 3) {
-		if (
-			pricing.provider3 == null ||
-			pricing.provider3 === ""
-		) {
-			throw new Error(
-				"No pricing configured for provider 3 for this country and service",
-			);
-		}
-		price = pricing.provider3;
 	} else {
 		price = pricing.provider2;
 	}
@@ -365,6 +413,82 @@ const resolveUserCountryService = async (
 		country: countryFind,
 		service: serviceFind,
 		pricing: { ...pricing, price },
+	};
+};
+
+const resolveUserCountryServiceP3 = async (
+	apiKey,
+	countryParam,
+	serviceParam,
+) => {
+	const user = await userRepository.findOne({
+		where: { apiKey },
+	});
+	if (!user) throw new Error("User not found");
+
+	const [countries, services] = await Promise.all(
+		[
+			CacheService.get(
+				"countries:all",
+				async () => {
+					return await countryRepository.find();
+				},
+			),
+			CacheService.get(
+				"services:all",
+				async () => {
+					return await serviceRepository.find();
+				},
+			),
+		],
+	);
+
+	let countryFind = countries.find(
+		(c) =>
+			c.code_country === String(countryParam),
+	);
+	if (!countryFind) {
+		countryFind = countries.find(
+			(c) => c.name === String(countryParam),
+		);
+	}
+	if (!countryFind) {
+		countryFind = countries.find(
+			(c) => c.id === parseInt(countryParam),
+		);
+	}
+	if (!countryFind)
+		throw new Error("Country not found");
+
+	let serviceFind = services.find(
+		(s) => s.code === String(serviceParam),
+	);
+	if (!serviceFind)
+		throw new Error("Service not found");
+
+	const cfg = await getP3Config(
+		countryFind.id,
+		serviceFind.id,
+	);
+	if (!cfg) {
+		throw new Error(
+			"No provider 3 configuration for this country and service",
+		);
+	}
+
+	const price = parseFloat(cfg.price);
+	if (!Number.isFinite(price) || price < 0) {
+		throw new Error(
+			"Invalid provider 3 price for this country and service",
+		);
+	}
+
+	return {
+		user,
+		country: countryFind,
+		service: serviceFind,
+		cfg,
+		price,
 	};
 };
 

@@ -9,6 +9,7 @@ import EmailPrice from "./EmailPrice.model.js";
 import OrderReorder from "./OrderReorder.model.js";
 import PaymentInvoice from "./PaymentInvoice.model.js";
 import Provider3AccessSnapshot from "./Provider3AccessSnapshot.model.js";
+import Provider3CountryServiceConfig from "./Provider3CountryServiceConfig.model.js";
 
 export const entities = [
 	User,
@@ -22,4 +23,5 @@ export const entities = [
 	EmailPrice,
 	PaymentInvoice,
 	Provider3AccessSnapshot,
+	Provider3CountryServiceConfig,
 ];

@@ -43,9 +43,6 @@ function applyPricingSearchFilter(qb, search) {
 				})
 				.orWhere("CAST(csp.provider2 AS CHAR) LIKE :pattern", {
 					pattern,
-				})
-				.orWhere("CAST(csp.provider3 AS CHAR) LIKE :pattern", {
-					pattern,
 				});
 		}),
 	);

@@ -3,32 +3,49 @@ import axios from "axios";
 
 dotenv.config();
 
+const NO_MESSAGES_YET_RE =
+	/no messages found|no messages|no message|not found.*number|not received yet/i;
+
 /**
- * True when provider says the SMS/code is not ready yet (align with other providers' PENDING).
- * e.g. {"detail":"No messages found for the provided number"} with HTTP 404.
+ * Provider still waiting for SMS (any HTTP status / shape).
+ * e.g. {"detail":"No messages found for the provided number"}
  */
 function isPendingNoMessagesBody(data) {
 	if (data == null) return false;
 	if (typeof data === "string") {
-		return /no messages|no message|not found.*number|not received yet/i.test(
-			data,
-		);
+		return NO_MESSAGES_YET_RE.test(data);
 	}
 	if (typeof data === "object") {
-		const text = [
+		const parts = [
 			data.detail,
 			data.message,
 			data.msg,
 			data.error,
-		]
+			data.description,
+		];
+		if (Array.isArray(data.errors)) {
+			parts.push(...data.errors.map((e) => String(e)));
+		} else if (data.errors != null) {
+			parts.push(String(data.errors));
+		}
+		const text = parts
 			.filter((x) => x != null && String(x).trim() !== "")
 			.map((x) => String(x))
 			.join(" ");
-		return /no messages|no message|not found.*number|not received yet/i.test(
-			text,
-		);
+		if (NO_MESSAGES_YET_RE.test(text)) return true;
+		try {
+			return NO_MESSAGES_YET_RE.test(JSON.stringify(data));
+		} catch {
+			return false;
+		}
 	}
 	return false;
+}
+
+function logThirdProviderRequest(method, url, params) {
+	const full = axios.getUri({ method, url, params });
+	const safe = full.replace(/([?&]token=)[^&]*/gi, "$1***");
+	console.log("[third-provider] outgoing", method, safe);
 }
 
 /**
@@ -70,13 +87,15 @@ class ThirdNumberServices {
 	async getMobileNumber(countryCcode, operator, count = 1) {
 		this.assertConfigured();
 		const url = `${this.apiUrl}/get_numbers`;
+		const params = {
+			country: countryCcode,
+			operator,
+			count,
+			token: this.apiKey,
+		};
+		logThirdProviderRequest("GET", url, params);
 		const response = await axios.get(url, {
-			params: {
-				country: countryCcode,
-				operator,
-				count,
-				token: this.apiKey,
-			},
+			params,
 			validateStatus: () => true,
 			timeout: 15000,
 			headers: {
@@ -125,11 +144,13 @@ class ThirdNumberServices {
 	async getMessagesRaw(number) {
 		this.assertConfigured();
 		const url = `${this.apiUrl}/get_messages`;
+		const params = {
+			number: String(number).replace(/^\+/, ""),
+			token: this.apiKey,
+		};
+		logThirdProviderRequest("GET", url, params);
 		const response = await axios.get(url, {
-			params: {
-				number: String(number).replace(/^\+/, ""),
-				token: this.apiKey,
-			},
+			params,
 			validateStatus: () => true,
 			timeout: 15000,
 			headers: {
@@ -149,14 +170,15 @@ class ThirdNumberServices {
 			const response = await this.getMessagesRaw(number);
 			const data = response?.data;
 
+			if (isPendingNoMessagesBody(data)) {
+				return {
+					code: 202,
+					msg: "PENDING",
+					data: null,
+				};
+			}
+
 			if (response.status >= 400) {
-				if (isPendingNoMessagesBody(data)) {
-					return {
-						code: 202,
-						msg: "PENDING",
-						data: null,
-					};
-				}
 				const msg =
 					typeof data === "string"
 						? data
@@ -253,12 +275,14 @@ class ThirdNumberServices {
 			);
 		}
 		const url = `${base}/accessinfo`;
+		const params = {
+			interval,
+			service: serviceName,
+			token: this.apiKey,
+		};
+		logThirdProviderRequest("GET", url, params);
 		const response = await axios.get(url, {
-			params: {
-				interval,
-				service: serviceName,
-				token: this.apiKey,
-			},
+			params,
 			validateStatus: () => true,
 			timeout: 30000,
 			headers: {

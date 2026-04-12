@@ -5,6 +5,7 @@ import { countryServicePricingRoute } from "./countryServicePricing.route.js";
 import { emailAdminRoute } from "./emailAdmin.route.js";
 import { emailRoute } from "./email.route.js";
 import { heleketRoute } from "./heleket.route.js";
+import { provider3Route } from "./provider3.route.js";
 // import { paymentRoute } from "./payment.route.js";
 
 export const Route = async (app) => {
@@ -34,6 +35,10 @@ export const Route = async (app) => {
 
 	app.register(heleketRoute, {
 		prefix: "/payment/heleket",
+	});
+
+	app.register(provider3Route, {
+		prefix: "/provider3",
 	});
 
 	// app.register(paymentRoute, {

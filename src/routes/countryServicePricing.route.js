@@ -68,7 +68,6 @@ export const countryServicePricingRoute = (
 						},
 						provider1: pricing.provider1,
 						provider2: pricing.provider2,
-						provider3: pricing.provider3,
 					}));
 				}
 
@@ -120,7 +119,6 @@ export const countryServicePricingRoute = (
 						},
 						provider1: pricing.provider1,
 						provider2: pricing.provider2,
-						provider3: pricing.provider3,
 					}));
 				}
 
@@ -166,7 +164,6 @@ export const countryServicePricingRoute = (
 						},
 						provider1: pricing.provider1,
 						provider2: pricing.provider2,
-						provider3: pricing.provider3,
 					}));
 				}
 
@@ -217,7 +214,6 @@ export const countryServicePricingRoute = (
 						},
 						provider1: data.provider1,
 						provider2: data.provider2,
-						provider3: data.provider3,
 					};
 				}
 
@@ -249,7 +245,6 @@ export const countryServicePricingRoute = (
 					serviceId,
 					priceProvider1,
 					priceProvider2,
-					priceProvider3,
 				} = request.query;
 
 				// Validate required parameters
@@ -310,23 +305,6 @@ export const countryServicePricingRoute = (
 					});
 				}
 
-				const price3 =
-					priceProvider3 !== undefined &&
-					priceProvider3 !== null &&
-					priceProvider3 !== ""
-						? parseFloat(priceProvider3)
-						: null;
-				if (
-					price3 !== null &&
-					(isNaN(price3) || price3 < 0)
-				) {
-					return reply.status(400).send({
-						state: "400",
-						error:
-							"priceProvider3 must be a valid non-negative number",
-					});
-				}
-
 				// Check if pricing already exists for this combination
 				const existingPricing =
 					await getByCountryAndService(
@@ -348,7 +326,6 @@ export const countryServicePricingRoute = (
 					service: { id: parseInt(serviceId) },
 					provider1: price1,
 					provider2: price2,
-					provider3: price3,
 				};
 
 				const pricing = await create(pricingData);
@@ -363,7 +340,6 @@ export const countryServicePricingRoute = (
 						serviceId: parseInt(serviceId),
 						provider1: price1,
 						provider2: price2,
-						provider3: price3,
 					},
 				});
 			} catch (error) {
@@ -391,14 +367,13 @@ export const countryServicePricingRoute = (
 					id,
 					priceProvider1,
 					priceProvider2,
-					priceProvider3,
 				} = request.query;
 
 				if (!id) {
 					return reply.status(400).send({
 						state: "400",
 						error:
-							"id is required; optionally pass priceProvider1, priceProvider2, priceProvider3",
+							"id is required; optionally pass priceProvider1, priceProvider2",
 					});
 				}
 
@@ -431,30 +406,12 @@ export const countryServicePricingRoute = (
 					}
 					data.provider2 = p;
 				}
-				if (priceProvider3 !== undefined) {
-					if (
-						priceProvider3 === "" ||
-						priceProvider3 === "null"
-					) {
-						data.provider3 = null;
-					} else {
-						const p = parseFloat(priceProvider3);
-						if (isNaN(p) || p < 0) {
-							return reply.status(400).send({
-								state: "400",
-								error:
-									"priceProvider3 must be a valid non-negative number",
-							});
-						}
-						data.provider3 = p;
-					}
-				}
 
 				if (Object.keys(data).length === 0) {
 					return reply.status(400).send({
 						state: "400",
 						error:
-							"Provide at least one of priceProvider1, priceProvider2, priceProvider3",
+							"Provide at least one of priceProvider1, priceProvider2",
 					});
 				}
 

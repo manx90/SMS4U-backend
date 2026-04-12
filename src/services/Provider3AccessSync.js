@@ -1,23 +1,17 @@
 import cron from "node-cron";
-import { AppDataSource } from "../config/database.js";
-import Service from "../models/Service.model.js";
 import thirdNumberServices from "../api/third-Number.service.js";
 import { replaceSnapshotsForService } from "../repositories/provider3Access.repo.js";
+import { getDistinctServicesForAccessSync } from "../repositories/provider3CountryService.repo.js";
+import { getByCode } from "../repositories/service.repo.js";
 
-/**
- * Periodically syncs provider3 /accessinfo into provider3_access_snapshots
- * for every service that has service.provider3 set.
- */
 class Provider3AccessSync {
 	constructor() {
 		this.isEnabled =
 			process.env.PROVIDER3_ACCESS_SYNC_ENABLED !==
 			"false";
-		/** API query param e.g. 30min */
 		this.accessInfoInterval =
 			process.env.PROVIDER3_ACCESS_INFO_INTERVAL ||
 			"30min";
-		/** node-cron expression, default every 30 minutes */
 		this.cronExpression =
 			process.env.PROVIDER3_ACCESS_SYNC_CRON ||
 			"*/30 * * * *";
@@ -83,11 +77,6 @@ class Provider3AccessSync {
 		}
 	}
 
-	/**
-	 * Same job as the cron: refresh /accessinfo snapshots for every service with provider3 set.
-	 * @param {{ ignoreDisabled?: boolean }} options — admin manual run may pass ignoreDisabled: true to run even when PROVIDER3_ACCESS_SYNC_ENABLED=false
-	 * @returns {Promise<{ ok: number; failed: number; skipped?: boolean; reason?: string }>}
-	 */
 	async syncAll(options = {}) {
 		const ignoreDisabled = options.ignoreDisabled === true;
 
@@ -129,18 +118,12 @@ class Provider3AccessSync {
 		this.isSyncing = true;
 
 		try {
-			const repo =
-				AppDataSource.getRepository(Service);
-			const all = await repo.find();
-			const services = all.filter(
-				(s) =>
-					s.provider3 &&
-					String(s.provider3).trim() !== "",
-			);
+			const distinct =
+				await getDistinctServicesForAccessSync();
 
-			if (services.length === 0) {
+			if (distinct.length === 0) {
 				console.log(
-					"📭 Provider3 access sync: no services with provider3 field set",
+					"📭 Provider3 access sync: no provider3_country_service_config rows",
 				);
 				return {
 					ok: 0,
@@ -153,9 +136,16 @@ class Provider3AccessSync {
 			let ok = 0;
 			let failed = 0;
 
-			for (const svc of services) {
+			for (const item of distinct) {
+				const svc = await getByCode(
+					item.serviceCode,
+				);
+				if (!svc) {
+					failed++;
+					continue;
+				}
 				const apiName = String(
-					svc.provider3 || svc.name,
+					item.upstreamServiceName || svc.name,
 				).trim();
 				try {
 					const data =

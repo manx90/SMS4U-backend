@@ -5,13 +5,6 @@ import CacheService from "../services/CacheService.js";
 export const serviceRepository =
 	AppDataSource.getRepository(Service);
 
-const provider3OrNull = (v) => {
-	if (v === undefined || v === null) return null;
-	const s = String(v).trim();
-	return s === "" ? null : s;
-};
-
-// crud
 export const getAll = async () => {
 	return await CacheService.get(
 		"services:all",
@@ -30,7 +23,6 @@ export const getByCode = async (code) =>
 		code,
 	});
 
-// data: { name, code, provider1, provider2, provider3 }
 export const create = async (data) => {
 	const existsByName = await checkServiceName(
 		data.name,
@@ -62,13 +54,11 @@ export const create = async (data) => {
 			code: data.code,
 			provider1: data.provider1 || "",
 			provider2: data.provider2 || "",
-			provider3: provider3OrNull(data.provider3),
 		});
 	const result = await serviceRepository.save(
 		newService,
 	);
 
-	// Invalidate cache after creating new service
 	CacheService.invalidate("services:all");
 
 	return result;
@@ -81,7 +71,6 @@ export const update = async (id, data) => {
 	if (data.name !== undefined)
 		updateData.name = data.name;
 	if (data.code !== undefined) {
-		// Check if code is unique (excluding current service)
 		const existingService =
 			await serviceRepository.findOne({
 				where: { code: data.code },
@@ -100,11 +89,8 @@ export const update = async (id, data) => {
 		updateData.provider1 = data.provider1;
 	if (data.provider2 !== undefined)
 		updateData.provider2 = data.provider2;
-	if (data.provider3 !== undefined)
-		updateData.provider3 = provider3OrNull(data.provider3);
 	await serviceRepository.update(id, updateData);
 
-	// Invalidate cache after updating service
 	CacheService.invalidate("services:all");
 };
 
@@ -117,7 +103,6 @@ export const remove = async (id) => {
 			svc,
 		);
 
-		// Invalidate cache after removing service
 		CacheService.invalidate("services:all");
 
 		if (result) {
@@ -128,7 +113,6 @@ export const remove = async (id) => {
 	}
 };
 
-// utils
 const checkServiceName = async (name) =>
 	await serviceRepository.findOne({
 		where: { name },
@@ -151,10 +135,5 @@ export const getServiceByProviderCode = async (
 ) => {
 	if (provider === "first")
 		return await checkProvider1(code);
-	if (provider === "third") {
-		return await serviceRepository.findOne({
-			where: { provider3: code },
-		});
-	}
 	return await checkProvider2(code);
 };

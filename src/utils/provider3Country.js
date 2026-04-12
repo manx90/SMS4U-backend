@@ -2,28 +2,46 @@ import {
 	getOne as getCountryById,
 	getByCodeCountry,
 } from "../repositories/country.repo.js";
+import { getByCode as getServiceByCode } from "../repositories/service.repo.js";
+import { getByCountryAndService } from "../repositories/provider3CountryService.repo.js";
 
-/**
- * Resolve query `country` the same way as /service/provider3/operators
- * (numeric id → provider3 or code_country).
- */
 export async function resolveCountryFilterForProvider3(
 	countryQuery,
+	serviceCode,
 ) {
 	let countryFilter = String(countryQuery ?? "").trim();
 	if (!countryFilter) return countryFilter;
 
-	if (/^\d+$/.test(countryFilter)) {
-		let cRow = await getCountryById(
-			parseInt(countryFilter, 10),
+	if (/^\d+$/.test(countryFilter) && serviceCode) {
+		const svc = await getServiceByCode(
+			String(serviceCode),
 		);
+		let cRow = await getByCodeCountry(countryFilter);
 		if (!cRow) {
-			cRow = await getByCodeCountry(countryFilter);
+			cRow = await getCountryById(
+				parseInt(countryFilter, 10),
+			);
 		}
-		if (cRow) {
-			const p3 = cRow.provider3?.trim();
+		if (cRow && svc) {
+			const cfg = await getByCountryAndService(
+				cRow.id,
+				svc.id,
+			);
+			const p3 = cfg?.upstreamCountryCode?.trim();
 			if (p3) countryFilter = p3;
 			else if (cRow.code_country?.trim()) {
+				countryFilter = cRow.code_country.trim();
+			}
+		}
+	} else if (/^\d+$/.test(countryFilter)) {
+		let cRow = await getByCodeCountry(countryFilter);
+		if (!cRow) {
+			cRow = await getCountryById(
+				parseInt(countryFilter, 10),
+			);
+		}
+		if (cRow) {
+			if (cRow.code_country?.trim()) {
 				countryFilter = cRow.code_country.trim();
 			}
 		}

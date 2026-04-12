@@ -5,13 +5,6 @@ import CacheService from "../services/CacheService.js";
 export const countryRepository =
 	AppDataSource.getRepository(Country);
 
-const provider3OrNull = (v) => {
-	if (v === undefined || v === null) return null;
-	const s = String(v).trim();
-	return s === "" ? null : s;
-};
-
-// crud
 export const getAll = async () => {
 	return await CacheService.get(
 		"countries:all",
@@ -25,20 +18,18 @@ export const getOne = async (id) =>
 		where: { id: parseInt(id) },
 	});
 
-/** Lookup by internal code_country (e.g. "2292") when country query is not a row id */
 export const getByCodeCountry = async (code_country) =>
 	await countryRepository.findOne({
 		where: {
 			code_country: String(code_country ?? "").trim(),
 		},
 	});
-// data: { country, code_country, provider1, provider2, provider3 }
+
 export const create = async ({
 	country,
 	code_country,
 	provider1,
 	provider2,
-	provider3,
 }) => {
 	const existingByName = await checkCountryName(
 		country,
@@ -74,36 +65,25 @@ export const create = async ({
 			);
 	}
 
-	if (provider3) {
-		const existingP3 =
-			await checkCountryProvider3(provider3);
-		if (existingP3)
-			throw new Error(
-				"provider3 already exists for another country",
-			);
-	}
-
 	const dataCreate = {
 		name: country,
 		code_country,
 		provider1,
 		provider2,
-		provider3: provider3OrNull(provider3),
 	};
 
 	const result = await countryRepository.save(
 		dataCreate,
 	);
 
-	// Invalidate cache after creating new country
 	CacheService.invalidate("countries:all");
 
 	return result;
 };
-/** Update country; validates uniqueness for name/code/providers excluding this row. */
+
 export const update = async (
 	id,
-	{ country, code_country, provider1, provider2, provider3 },
+	{ country, code_country, provider1, provider2 },
 ) => {
 	const existing = await getOne(id);
 	if (!existing)
@@ -170,20 +150,6 @@ export const update = async (
 			);
 	}
 
-	const nextP3 = provider3OrNull(provider3);
-	const existingP3 = existing.provider3;
-	if (
-		nextP3 != null &&
-		String(nextP3) !== String(existingP3 ?? "")
-	) {
-		const other =
-			await checkCountryProvider3(nextP3);
-		if (other && other.id !== parsedId)
-			throw new Error(
-				"provider3 already exists for another country",
-			);
-	}
-
 	const updateData = {};
 	if (country !== undefined)
 		updateData.name = String(country).trim();
@@ -194,8 +160,6 @@ export const update = async (
 		updateData.provider1 = provider1;
 	if (provider2 !== undefined)
 		updateData.provider2 = provider2;
-	if (provider3 !== undefined)
-		updateData.provider3 = provider3OrNull(provider3);
 
 	await countryRepository.update(parsedId, updateData);
 
@@ -203,7 +167,7 @@ export const update = async (
 
 	return { ...existing, ...updateData };
 };
-// service
+
 export const remove = async (id) => {
 	const parsedId = Number(id);
 	if (Number.isNaN(parsedId)) {
@@ -222,12 +186,11 @@ export const remove = async (id) => {
 
 	await countryRepository.remove(country);
 
-	// Invalidate cache after removing country
 	CacheService.invalidate("countries:all");
 
-	return country; // أو ممكن ترجع رسالة فقط
+	return country;
 };
-// utils
+
 const checkCountryName = async (CountryName) =>
 	await countryRepository.findOne({
 		where: { name: CountryName },
@@ -240,10 +203,6 @@ const checkCountryProvider2 = async (provider2) =>
 	await countryRepository.findOne({
 		where: { provider2 },
 	});
-const checkCountryProvider3 = async (provider3) =>
-	await countryRepository.findOne({
-		where: { provider3 },
-	});
 const checkCountryCode = async (code_country) =>
 	await countryRepository.findOne({
 		where: { code_country },
@@ -255,9 +214,6 @@ export const getCountryByProviderCode = async (
 ) => {
 	if (provider === "first") {
 		return await checkCountryProvider1(code);
-	}
-	if (provider === "third") {
-		return await checkCountryProvider3(code);
 	}
 	return await checkCountryProvider2(code);
 };

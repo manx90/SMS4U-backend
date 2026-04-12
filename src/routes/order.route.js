@@ -42,9 +42,6 @@ import {
 	markLatestReorderCompleted,
 	markLatestReorderFailed,
 } from "../repositories/orderReorder.repo.js";
-import { resolveCountryFilterForProvider3 } from "../utils/provider3Country.js";
-import { resolveOperatorByIndex } from "../repositories/provider3Access.repo.js";
-
 export const orderRoute = async (app) => {
 	app.get("/get-number", {
 		preHandler: [requireUser()],
@@ -55,23 +52,7 @@ export const orderRoute = async (app) => {
 				country,
 				serviceCode,
 				provider,
-				operator,
-				operatorIndex,
-				server,
 			} = request.query;
-
-			/** Must match Provider 3 access sync snapshot interval (not client-configurable). */
-			const accessInfoInterval =
-				process.env.PROVIDER3_ACCESS_INFO_INTERVAL ||
-				"30min";
-
-			/** 1-based server slot (query `server`): same as GET /service/provider3/operators `index`. Legacy: `operatorIndex`. */
-			const serverSlotRaw =
-				server !== undefined &&
-				server !== null &&
-				String(server).trim() !== ""
-					? server
-					: operatorIndex;
 
 			// Validate required parameters (allow "0" as valid value)
 			if (
@@ -92,98 +73,25 @@ export const orderRoute = async (app) => {
 						"apiKey, country, serviceCode, provider are required",
 				});
 			}
+			if (String(provider) === "3") {
+				return reply.status(400).send({
+					state: "400",
+					error:
+						"Provider 3 orders use GET /api/v1/provider3/get-number",
+				});
+			}
+
 			const prov =
 				String(provider) === "1"
 					? "first"
-					: String(provider) === "3"
-						? "third"
-						: "second";
+					: "second";
 
-			let resolvedOperatorThird = null;
-			if (prov === "third") {
-				const isAdmin = request.user?.role === "admin";
-				const hasRaw =
-					operator !== undefined &&
-					operator !== null &&
-					String(operator).trim() !== "";
-				const hasIndex =
-					serverSlotRaw !== undefined &&
-					serverSlotRaw !== null &&
-					String(serverSlotRaw).trim() !== "";
-
-				try {
-					if (isAdmin) {
-						if (hasRaw) {
-							resolvedOperatorThird =
-								String(operator).trim();
-						} else if (hasIndex) {
-							const countryF =
-								await resolveCountryFilterForProvider3(
-									country,
-								);
-							resolvedOperatorThird =
-								await resolveOperatorByIndex(
-									String(serviceCode),
-									String(accessInfoInterval),
-									countryF,
-									serverSlotRaw,
-								);
-						}
-					} else {
-						if (hasRaw) {
-							return reply.status(400).send({
-								state: "400",
-								error:
-									"Use server (1, 2, 3, …) for provider 3; raw operator is not accepted for client requests",
-							});
-						}
-						if (!hasIndex) {
-							return reply.status(400).send({
-								state: "400",
-								error:
-									"server is required when provider is 3 (1 = Server 1, 2 = Server 2, …)",
-							});
-						}
-						const countryF =
-							await resolveCountryFilterForProvider3(
-								country,
-							);
-						resolvedOperatorThird =
-							await resolveOperatorByIndex(
-								String(serviceCode),
-								String(accessInfoInterval),
-								countryF,
-								serverSlotRaw,
-							);
-					}
-				} catch (e) {
-					return reply.status(400).send({
-						state: "400",
-						error: e.message || "Invalid operator selection",
-					});
-				}
-
-				if (
-					!resolvedOperatorThird ||
-					String(resolvedOperatorThird).trim() === ""
-				) {
-					return reply.status(400).send({
-						state: "400",
-						error: isAdmin
-							? "operator or server is required when provider is 3"
-							: "server is required when provider is 3 (1, 2, 3, …)",
-					});
-				}
-			}
 			try {
 				const order = await create(
 					apiKey,
 					country,
 					serviceCode,
 					prov,
-					prov === "third"
-						? resolvedOperatorThird
-						: null,
 				);
 				console.log(order);
 				return reply.send({

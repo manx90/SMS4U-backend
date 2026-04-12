@@ -56,7 +56,6 @@ export const countryRoute = (app) => {
 					code_country,
 					provider1,
 					provider2,
-					provider3,
 				} = request.query;
 
 				console.log("Received parameters:", {
@@ -64,7 +63,6 @@ export const countryRoute = (app) => {
 					code_country,
 					provider1,
 					provider2,
-					provider3,
 				});
 
 				if (
@@ -99,7 +97,6 @@ export const countryRoute = (app) => {
 					code_country,
 					provider1,
 					provider2,
-					provider3,
 				};
 
 				const data = await create(dataCreate);
@@ -139,7 +136,6 @@ export const countryRoute = (app) => {
 					code_country,
 					provider1,
 					provider2,
-					provider3,
 				} = request.query;
 
 				if (
@@ -171,7 +167,6 @@ export const countryRoute = (app) => {
 					code_country,
 					provider1,
 					provider2,
-					provider3,
 				});
 
 				return reply.send({

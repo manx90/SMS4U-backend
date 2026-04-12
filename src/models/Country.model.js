@@ -25,12 +25,6 @@ const Country = new EntitySchema({
 			length: 255,
 			nullable: true,
 		},
-		/** ISO country code for provider 3 API (e.g. IT) */
-		provider3: {
-			type: "varchar",
-			length: 255,
-			nullable: true,
-		},
 		code_country: {
 			type: "varchar",
 			length: 10,
