@@ -85,12 +85,16 @@ export const findOperatorsForCountry = async (
 	let filtered = rows;
 	if (q) {
 		const upper = q.toUpperCase();
+		const isoAlpha2 = /^[A-Za-z]{2}$/.test(q);
 		filtered = rows.filter((r) => {
 			if (
 				r.ccode &&
 				r.ccode.toUpperCase() === upper
 			) {
 				return true;
+			}
+			if (isoAlpha2) {
+				return false;
 			}
 			if (
 				r.countryName &&

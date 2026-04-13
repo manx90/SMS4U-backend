@@ -442,6 +442,105 @@ export const provider3Route = async (app) => {
 		},
 	});
 
+	app.get("/operators-count", {
+		preHandler: requireUser(),
+		handler: async (req, res) => {
+			try {
+				const { serviceCode, country, interval } =
+					req.query;
+				if (!serviceCode || !country) {
+					return res.status(400).send({
+						state: "400",
+						error:
+							"serviceCode and country are required",
+					});
+				}
+				const snapshotInterval =
+					interval != null &&
+					String(interval).trim() !== ""
+						? String(interval).trim()
+						: process.env
+								.PROVIDER3_ACCESS_INFO_INTERVAL ||
+							"30min";
+				const countryFilter =
+					await resolveCountryFilterForProvider3(
+						country,
+						String(serviceCode),
+					);
+				const list = await findOperatorsForCountry(
+					String(serviceCode),
+					snapshotInterval,
+					countryFilter,
+				);
+				return res.send({
+					state: "200",
+					data: { count: list.length },
+				});
+			} catch (e) {
+				return res.status(500).send({
+					state: "500",
+					error: e.message,
+				});
+			}
+		},
+	});
+
+	app.get("/operator", {
+		preHandler: requireUser(),
+		handler: async (req, res) => {
+			try {
+				const { serviceCode, country, server, interval } =
+					req.query;
+				if (
+					!serviceCode ||
+					!country ||
+					server == null ||
+					String(server).trim() === ""
+				) {
+					return res.status(400).send({
+						state: "400",
+						error:
+							"serviceCode, country, and server are required",
+					});
+				}
+				const snapshotInterval =
+					interval != null &&
+					String(interval).trim() !== ""
+						? String(interval).trim()
+						: process.env
+								.PROVIDER3_ACCESS_INFO_INTERVAL ||
+							"30min";
+				const countryFilter =
+					await resolveCountryFilterForProvider3(
+						country,
+						String(serviceCode),
+					);
+				const index1 = parseInt(String(server), 10);
+				if (!Number.isFinite(index1) || index1 < 1) {
+					return res.status(400).send({
+						state: "400",
+						error: "Invalid server index",
+					});
+				}
+				const operator = await resolveOperatorByIndex(
+					String(serviceCode),
+					snapshotInterval,
+					countryFilter,
+					index1,
+				);
+				return res.send({
+					state: "200",
+					data: { operator, index: index1 },
+				});
+			} catch (e) {
+				return res.status(400).send({
+					state: "400",
+					error: e.message,
+				});
+			}
+		},
+	});
+
 	app.get("/pricing-by-country", {
 		preHandler: requireUser(),
 		handler: async (req, res) => {
