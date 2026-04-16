@@ -1,5 +1,5 @@
 import cron from "node-cron";
-import thirdNumberServices from "../api/third-Number.service.js";
+import provider3Upstream from "../modules/provider3/services/upstream.service.js";
 import { replaceSnapshotsForService } from "../repositories/provider3Access.repo.js";
 import { getDistinctServicesForAccessSync } from "../repositories/provider3CountryService.repo.js";
 import { getByCode } from "../repositories/service.repo.js";
@@ -149,7 +149,7 @@ class Provider3AccessSync {
 				).trim();
 				try {
 					const data =
-						await thirdNumberServices.fetchAccessInfo(
+						await provider3Upstream.fetchAccessInfo(
 							apiName,
 							this.accessInfoInterval,
 						);

@@ -70,6 +70,50 @@ export const remove = async (id) => {
 };
 
 /** One upstream service name per service code for /accessinfo cron. */
+/** Countries that appear in at least one P3 config row (for user catalog). */
+export const getConfiguredCountries = async () => {
+	const all = await getAllWithRelations();
+	const byId = new Map();
+	for (const row of all) {
+		const c = row.country;
+		if (c?.id == null) continue;
+		if (!byId.has(c.id)) {
+			byId.set(c.id, {
+				id: c.id,
+				name: c.name,
+				code_country: c.code_country,
+			});
+		}
+	}
+	return Array.from(byId.values()).sort((a, b) =>
+		String(a.name || "").localeCompare(
+			String(b.name || ""),
+		),
+	);
+};
+
+/** P3 pricing rows for one country (catalog services for that country). */
+export const getConfiguredServicesForCountry = async (
+	countryId,
+) => {
+	const cid = parseInt(countryId, 10);
+	if (!Number.isFinite(cid)) {
+		throw new Error("Invalid countryId");
+	}
+	const all = await getAllWithRelations();
+	return all
+		.filter((r) => r.country?.id === cid)
+		.map((r) => ({
+			configId: r.id,
+			serviceId: r.service?.id,
+			serviceCode: r.service?.code,
+			serviceName: r.service?.name,
+			price: r.price,
+			upstreamCountryCode: r.upstreamCountryCode,
+			upstreamServiceName: r.upstreamServiceName,
+		}));
+};
+
 export const getDistinctServicesForAccessSync =
 	async () => {
 		const raw = await provider3ConfigRepository

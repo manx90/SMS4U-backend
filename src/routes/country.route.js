@@ -71,18 +71,12 @@ export const countryRoute = (app) => {
 					country === "" ||
 					code_country === undefined ||
 					code_country === null ||
-					code_country === "" ||
-					provider1 === undefined ||
-					provider1 === null ||
-					provider1 === "" ||
-					provider2 === undefined ||
-					provider2 === null ||
-					provider2 === ""
+					code_country === ""
 				) {
 					return reply.status(400).send({
 						state: "400",
 						error:
-							"country, code_country, provider1, and provider2 are required",
+							"country and code_country are required (provider1/provider2 optional for provider-3-only)",
 						received: {
 							country,
 							code_country,
@@ -95,8 +89,16 @@ export const countryRoute = (app) => {
 				const dataCreate = {
 					country,
 					code_country,
-					provider1,
-					provider2,
+					provider1:
+						provider1 != null &&
+						String(provider1).trim() !== ""
+							? String(provider1).trim()
+							: null,
+					provider2:
+						provider2 != null &&
+						String(provider2).trim() !== ""
+							? String(provider2).trim()
+							: null,
 				};
 
 				const data = await create(dataCreate);

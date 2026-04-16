@@ -1,7 +1,7 @@
 import { AppDataSource } from "../config/database.js";
 import secondNumberServices from "../api/second-Number.service.js";
 import firstNumberServices from "../api/first-Number.service.js";
-import thirdNumberServices from "../api/third-Number.service.js";
+import provider3Upstream from "../modules/provider3/services/upstream.service.js";
 import OrderModel from "../models/Order.model.js";
 import { userRepository } from "./user.repo.js";
 import { serviceRepository } from "./service.repo.js";
@@ -162,7 +162,7 @@ export const createProvider3Order = async (
 		await checkBalanceDiff(user, { price });
 
 		const number =
-			await thirdNumberServices.getMobileNumber(
+			await provider3Upstream.getMobileNumber(
 				String(ccode).trim(),
 				String(operatorForThird).trim(),
 				1,
@@ -213,10 +213,12 @@ export const createProvider3Order = async (
 
 		return savedOrder;
 	} catch (e) {
-		throw {
-			success: false,
-			message: e.message,
-		};
+		const err = new Error(
+			e?.message || String(e),
+		);
+		if (e?.stack) err.stack = e.stack;
+		if (e?.code) err.code = e.code;
+		throw err;
 	}
 };
 
@@ -296,10 +298,12 @@ export const create = async (
 
 		return savedOrder;
 	} catch (e) {
-		throw {
-			success: false,
-			message: e.message,
-		};
+		const err = new Error(
+			e?.message || String(e),
+		);
+		if (e?.stack) err.stack = e.stack;
+		if (e?.code) err.code = e.code;
+		throw err;
 	}
 };
 

@@ -11,7 +11,7 @@ import {
 import { requireUser } from "../decorator/AuthApi.decorator.js";
 import secondNumberServices from "../api/second-Number.service.js";
 import firstNumberServices from "../api/first-Number.service.js";
-import thirdNumberServices from "../api/third-Number.service.js";
+import { getSmsMessageForNumber } from "../modules/provider3/services/orderMessage.service.js";
 import { userRepository } from "../repositories/user.repo.js";
 import RefundService from "../services/RefundService.js";
 import EmailService from "../api/Email.service.js";
@@ -104,8 +104,7 @@ export const orderRoute = async (app) => {
 				});
 			} catch (error) {
 				console.log(error);
-				// Extract error message (handle both Error objects and wrapped errors from create function)
-				// create() wraps errors as {success: false, message: e.message}
+				// create() throws Error with preserved stack from upstream services
 				const errorMessage =
 					error?.message ||
 					(typeof error === "string"
@@ -114,8 +113,16 @@ export const orderRoute = async (app) => {
 				const errorMessageLower =
 					errorMessage?.toLowerCase() || "";
 
-				// Check if error is from provider (external API)
+				const netCodes = [
+					"ECONNRESET",
+					"ECONNREFUSED",
+					"ETIMEDOUT",
+					"ENOTFOUND",
+					"ECONNABORTED",
+					"EPIPE",
+				];
 				const isProviderError =
+					netCodes.includes(error?.code) ||
 					errorMessageLower?.includes(
 						"provider",
 					) ||
@@ -137,11 +144,35 @@ export const orderRoute = async (app) => {
 					errorMessageLower?.includes(
 						"connection",
 					) ||
+					errorMessageLower?.includes(
+						"temporarily unavailable",
+					) ||
+					errorMessageLower?.includes(
+						"repeated failures",
+					) ||
+					errorMessageLower?.includes(
+						"request failed",
+					) ||
+					errorMessageLower?.includes(
+						"status code",
+					) ||
+					errorMessageLower?.includes(
+						"socket hang up",
+					) ||
+					errorMessageLower?.includes(
+						"getaddrinfo",
+					) ||
+					errorMessageLower?.includes(
+						"econn",
+					) ||
 					error?.stack?.includes(
 						"Number.service",
 					) ||
 					error?.stack?.includes(
-						"third-Number.service",
+						"orderMessage.service",
+					) ||
+					error?.stack?.includes(
+						"upstream.service",
 					) ||
 					error?.code === "NO_OPERATOR";
 
@@ -239,9 +270,13 @@ export const orderRoute = async (app) => {
 						{
 							error: error,
 							message: errorMessage,
-							// stack: error.stack,
-							// name: error.name,
-							// apiKey: apiKey,
+							stack: error?.stack,
+							name: error?.name,
+							code: error?.code,
+							apiKey: apiKey,
+							country,
+							serviceCode,
+							provider: prov,
 						},
 					);
 
@@ -302,7 +337,7 @@ export const orderRoute = async (app) => {
 						);
 				} else if (Number(order.provider) === 3) {
 					providerRes =
-						await thirdNumberServices.getMessage(
+						await getSmsMessageForNumber(
 							order.number,
 						);
 				} else {
