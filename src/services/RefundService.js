@@ -405,6 +405,8 @@ class RefundService {
 				user: true,
 				country: true,
 				service: true,
+				p3Country: true,
+				p3Service: true,
 			},
 			take: limit,
 			skip: page * limit,

@@ -33,9 +33,13 @@ import {
 	isValidDomainName,
 	parsePriceNumber,
 } from "../utils/validation.js";
+import { getApiKeyFromRequest } from "../utils/requestApiKey.js";
 
-// Helper to check if user is admin
-const checkAdmin = async (apiKey) => {
+const checkAdmin = async (request) => {
+	const apiKey = getApiKeyFromRequest(request);
+	if (!apiKey) {
+		throw new Error("Admin access required");
+	}
 	const user = await userRepository.findOne({
 		where: { apiKey },
 	});
@@ -53,8 +57,7 @@ export const emailAdminRoute = async (app) => {
 		preHandler: [requireUser()],
 		handler: async (request, reply) => {
 			try {
-				const { apiKey } = request.query;
-				await checkAdmin(apiKey);
+				await checkAdmin(request);
 
 				const sites = await getAllSites();
 				return reply.send({
@@ -76,8 +79,7 @@ export const emailAdminRoute = async (app) => {
 		preHandler: [requireUser()],
 		handler: async (request, reply) => {
 			try {
-				const { apiKey } = request.query;
-				await checkAdmin(apiKey);
+				await checkAdmin(request);
 
 				const { id } = request.params;
 				const site = await getSiteById(
@@ -111,14 +113,13 @@ export const emailAdminRoute = async (app) => {
 		handler: async (request, reply) => {
 			try {
 				const {
-					apiKey,
 					name,
 					display_name,
 					api_name,
 					description,
 					status,
 				} = request.query;
-				await checkAdmin(apiKey);
+				await checkAdmin(request);
 
 				// Validate required fields
 				if (
@@ -192,7 +193,6 @@ export const emailAdminRoute = async (app) => {
 		handler: async (request, reply) => {
 			try {
 				const {
-					apiKey,
 					id,
 					name,
 					display_name,
@@ -200,7 +200,7 @@ export const emailAdminRoute = async (app) => {
 					description,
 					status,
 				} = request.query;
-				await checkAdmin(apiKey);
+				await checkAdmin(request);
 
 				if (!id) {
 					return reply.status(400).send({
@@ -261,8 +261,8 @@ export const emailAdminRoute = async (app) => {
 		preHandler: [requireUser()],
 		handler: async (request, reply) => {
 			try {
-				const { apiKey, id } = request.query;
-				await checkAdmin(apiKey);
+				const { id } = request.query;
+				await checkAdmin(request);
 
 				if (!id) {
 					return reply.status(400).send({
@@ -304,8 +304,7 @@ export const emailAdminRoute = async (app) => {
 		preHandler: [requireUser()],
 		handler: async (request, reply) => {
 			try {
-				const { apiKey } = request.query;
-				await checkAdmin(apiKey);
+				await checkAdmin(request);
 
 				const domains = await getAllDomains();
 				return reply.send({
@@ -327,8 +326,7 @@ export const emailAdminRoute = async (app) => {
 		preHandler: [requireUser()],
 		handler: async (request, reply) => {
 			try {
-				const { apiKey } = request.query;
-				await checkAdmin(apiKey);
+				await checkAdmin(request);
 
 				const { id } = request.params;
 				const domain = await getDomainById(
@@ -362,14 +360,13 @@ export const emailAdminRoute = async (app) => {
 		handler: async (request, reply) => {
 			try {
 				const {
-					apiKey,
 					name,
 					display_name,
 					api_name,
 					description,
 					status,
 				} = request.query;
-				await checkAdmin(apiKey);
+				await checkAdmin(request);
 
 				// Validate required fields
 				if (
@@ -443,7 +440,6 @@ export const emailAdminRoute = async (app) => {
 		handler: async (request, reply) => {
 			try {
 				const {
-					apiKey,
 					id,
 					name,
 					display_name,
@@ -451,7 +447,7 @@ export const emailAdminRoute = async (app) => {
 					description,
 					status,
 				} = request.query;
-				await checkAdmin(apiKey);
+				await checkAdmin(request);
 
 				if (!id) {
 					return reply.status(400).send({
@@ -512,8 +508,8 @@ export const emailAdminRoute = async (app) => {
 		preHandler: [requireUser()],
 		handler: async (request, reply) => {
 			try {
-				const { apiKey, id } = request.query;
-				await checkAdmin(apiKey);
+				const { id } = request.query;
+				await checkAdmin(request);
 
 				if (!id) {
 					return reply.status(400).send({
@@ -556,7 +552,7 @@ export const emailAdminRoute = async (app) => {
 		handler: async (request, reply) => {
 			try {
 				const { apiKey } = request.query;
-				await checkAdmin(apiKey);
+				await checkAdmin(request);
 
 				const prices = await getAllPrices();
 				return reply.send({
@@ -578,8 +574,7 @@ export const emailAdminRoute = async (app) => {
 		preHandler: [requireUser()],
 		handler: async (request, reply) => {
 			try {
-				const { apiKey } = request.query;
-				await checkAdmin(apiKey);
+				await checkAdmin(request);
 
 				const { id } = request.params;
 				const price = await getPriceById(
@@ -613,13 +608,12 @@ export const emailAdminRoute = async (app) => {
 		handler: async (request, reply) => {
 			try {
 				const {
-					apiKey,
 					site,
 					domain,
 					price,
 					active,
 				} = request.query;
-				await checkAdmin(apiKey);
+				await checkAdmin(request);
 
 				// Validate required fields
 				if (
@@ -741,14 +735,13 @@ export const emailAdminRoute = async (app) => {
 		handler: async (request, reply) => {
 			try {
 				const {
-					apiKey,
 					id,
 					site,
 					domain,
 					price: priceValue,
 					active,
 				} = request.query;
-				await checkAdmin(apiKey);
+				await checkAdmin(request);
 
 				if (!id) {
 					return reply.status(400).send({
@@ -806,8 +799,8 @@ export const emailAdminRoute = async (app) => {
 		preHandler: [requireUser()],
 		handler: async (request, reply) => {
 			try {
-				const { apiKey, id } = request.query;
-				await checkAdmin(apiKey);
+				const { id } = request.query;
+				await checkAdmin(request);
 
 				if (!id) {
 					return reply.status(400).send({
@@ -847,9 +840,8 @@ export const emailAdminRoute = async (app) => {
 		preHandler: [requireUser()],
 		handler: async (request, reply) => {
 			try {
-				const { apiKey, defaultPrice } =
-					request.query;
-				await checkAdmin(apiKey);
+				const { defaultPrice } = request.query;
+				await checkAdmin(request);
 
 				const price = defaultPrice
 					? parseFloat(defaultPrice)
@@ -921,8 +913,7 @@ export const emailAdminRoute = async (app) => {
 		preHandler: [requireUser()],
 		handler: async (request, reply) => {
 			try {
-				const { apiKey } = request.query;
-				await checkAdmin(apiKey);
+				await checkAdmin(request);
 
 				console.log(
 					"🔄 Manual email availability sync triggered by admin",
@@ -964,8 +955,8 @@ export const emailAdminRoute = async (app) => {
 		preHandler: [requireUser()],
 		handler: async (request, reply) => {
 			try {
-				const { apiKey, site } = request.query;
-				await checkAdmin(apiKey);
+				const { site } = request.query;
+				await checkAdmin(request);
 
 				if (!site) {
 					return reply.status(400).send({

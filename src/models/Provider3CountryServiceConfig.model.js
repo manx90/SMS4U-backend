@@ -34,16 +34,16 @@ const Provider3CountryServiceConfig = new EntitySchema({
 		},
 	},
 	relations: {
-		country: {
-			target: "Country",
+		p3Country: {
+			target: "P3Country",
 			type: "many-to-one",
-			joinColumn: { name: "countryId" },
+			joinColumn: { name: "p3CountryId" },
 			onDelete: "CASCADE",
 		},
-		service: {
-			target: "Service",
+		p3Service: {
+			target: "P3Service",
 			type: "many-to-one",
-			joinColumn: { name: "serviceId" },
+			joinColumn: { name: "p3ServiceId" },
 			onDelete: "CASCADE",
 		},
 	},

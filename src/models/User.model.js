@@ -47,7 +47,7 @@ const User = new EntitySchema({
 			nullable: false,
 		},
 	},
-	relation: {
+	relations: {
 		Order: {
 			target: "Order",
 			type: "one-to-many",

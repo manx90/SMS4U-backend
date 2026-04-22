@@ -8,6 +8,8 @@ import { serviceRepository } from "./service.repo.js";
 import { countryRepository } from "./country.repo.js";
 import { getByCountryAndService } from "./countryServicePricing.repo.js";
 import { getByCountryAndService as getP3Config } from "./provider3CountryService.repo.js";
+import { p3CountryRepository } from "./p3Country.repo.js";
+import { p3ServiceRepository } from "./p3Service.repo.js";
 import { balanceChange } from "./user.repo.js";
 import CacheService from "../services/CacheService.js";
 export const orderRepository =
@@ -20,6 +22,8 @@ export const getAll = async () =>
 			user: true,
 			service: true,
 			country: true,
+			p3Country: true,
+			p3Service: true,
 		},
 	});
 export const getOne = async (id) =>
@@ -29,6 +33,8 @@ export const getOne = async (id) =>
 			user: true,
 			service: true,
 			country: true,
+			p3Country: true,
+			p3Service: true,
 		},
 	});
 export const getByUserApiKey = async (apiKey) => {
@@ -42,6 +48,8 @@ export const getByUserApiKey = async (apiKey) => {
 			user: true,
 			service: true,
 			country: true,
+			p3Country: true,
+			p3Service: true,
 		},
 	});
 };
@@ -59,6 +67,8 @@ export const getByNumberForUser = async (
 			user: true,
 			service: true,
 			country: true,
+			p3Country: true,
+			p3Service: true,
 		},
 	});
 	if (!order)
@@ -82,6 +92,8 @@ export const getByPublicId = async (
 			user: true,
 			service: true,
 			country: true,
+			p3Country: true,
+			p3Service: true,
 		},
 	});
 	if (!order)
@@ -121,6 +133,8 @@ export const getEmailOrderForUser = async (
 			user: true,
 			service: true,
 			country: true,
+			p3Country: true,
+			p3Service: true,
 		},
 	});
 	if (!order) {
@@ -136,7 +150,7 @@ export const createProvider3Order = async (
 	operatorForThird,
 ) => {
 	try {
-		const { user, service, country, cfg, price } =
+		const { user, p3Country, p3Service, cfg, price } =
 			await resolveUserCountryServiceP3(
 				apiKey,
 				countryParam,
@@ -196,8 +210,10 @@ export const createProvider3Order = async (
 					manager.getRepository(OrderModel);
 				const orderEntity = orderRepoTx.create({
 					user,
-					service,
-					country: country,
+					service: null,
+					country: null,
+					p3Country,
+					p3Service,
 					price,
 					typeServe: "number",
 					status: "pending",
@@ -430,41 +446,45 @@ const resolveUserCountryServiceP3 = async (
 	});
 	if (!user) throw new Error("User not found");
 
-	const [countries, services] = await Promise.all(
+	const [p3Countries, p3Services] = await Promise.all(
 		[
 			CacheService.get(
-				"countries:all",
+				"p3_countries:all",
 				async () => {
-					return await countryRepository.find();
+					return await p3CountryRepository.find({
+						order: { name: "ASC" },
+					});
 				},
 			),
 			CacheService.get(
-				"services:all",
+				"p3_services:all",
 				async () => {
-					return await serviceRepository.find();
+					return await p3ServiceRepository.find({
+						order: { name: "ASC" },
+					});
 				},
 			),
 		],
 	);
 
-	let countryFind = countries.find(
+	let countryFind = p3Countries.find(
 		(c) =>
 			c.code_country === String(countryParam),
 	);
 	if (!countryFind) {
-		countryFind = countries.find(
+		countryFind = p3Countries.find(
 			(c) => c.name === String(countryParam),
 		);
 	}
 	if (!countryFind) {
-		countryFind = countries.find(
-			(c) => c.id === parseInt(countryParam),
+		countryFind = p3Countries.find(
+			(c) => c.id === parseInt(countryParam, 10),
 		);
 	}
 	if (!countryFind)
 		throw new Error("Country not found");
 
-	let serviceFind = services.find(
+	let serviceFind = p3Services.find(
 		(s) => s.code === String(serviceParam),
 	);
 	if (!serviceFind)
@@ -489,8 +509,8 @@ const resolveUserCountryServiceP3 = async (
 
 	return {
 		user,
-		country: countryFind,
-		service: serviceFind,
+		p3Country: countryFind,
+		p3Service: serviceFind,
 		cfg,
 		price,
 	};

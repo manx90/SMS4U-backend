@@ -11,25 +11,35 @@ third_NUMBER_API_KEY=your_token_here
 
 مزامنة access (اختياري): `PROVIDER3_ACCESS_SYNC_ENABLED`, `PROVIDER3_ACCESS_SYNC_CRON`, `PROVIDER3_ACCESS_INFO_INTERVAL`, `PROVIDER3_ACCESS_SYNC_TZ`.
 
+## نموذج البيانات (عزل P3)
+
+- الدول والخدمات الخاصة بالمزوّد الثالث في جداول **`p3_countries`** و**`p3_services`** (وليس `countries` / `service`).
+- **`provider3_country_service_config`**: يربط `p3CountryId` + `p3ServiceId` مع السعر و`upstreamCountryCode` و`upstreamServiceName`.
+- في واجهة الـ API تُستخدم أسماء المعاملات `countryId` و`serviceId` في مسارات مثل `config/create`، لكن قيمها هي **معرّفات جداول P3** أعلاه.
+- طلبات الرقم ذات **`provider = 3`** تُخزَّن مع **`p3CountryId` / `p3ServiceId`**؛ التفاصيل في `PROVIDER3_ADMIN_API.md` (قسم الترحيل).
+
 ## إعداد البيانات (أدمن)
 
-- **جدول `provider3_country_service_config`**: لكل زوج (دولة + خدمة): السعر، `upstreamCountryCode`، `upstreamServiceName`.
 - مسارات الإدارة:
-  - `GET /api/v1/provider3/config` — قائمة كاملة (أدمن)
-  - `GET /api/v1/provider3/config/create?countryId=&serviceId=&price=&upstreamCountryCode=&upstreamServiceName=`
+  - `GET /api/v1/provider3/config` — قائمة كاملة (أدمن)، مع `p3Country` / `p3Service` (و`country` / `service` كأسماء مستعارة للتوافق).
+  - `GET /api/v1/provider3/config/create?countryId=&serviceId=&price=&upstreamCountryCode=&upstreamServiceName=` — `countryId` و`serviceId` من P3.
   - `GET /api/v1/provider3/config/update?id=&price=&...`
   - `GET /api/v1/provider3/config/remove?id=`
+  - `GET /api/v1/provider3/admin/p3-catalog-countries` — كل دول P3 (أدمن).
+  - `GET /api/v1/provider3/admin/p3-catalog-services` — كل خدمات P3 (أدمن).
+  - `GET /api/v1/provider3/admin/country-create` — إنشاء في `p3_countries`.
+  - `GET /api/v1/provider3/admin/service-create` — إنشاء في `p3_services`.
 
 ## المستخدمون
 
-### المشغّلون (من آخر access sync)
+### فهرس الخادم (بدون كشف أسماء المشغّلين)
 
-`GET /api/v1/provider3/operators?serviceCode=wa&country=IT&interval=30min`
+استخدم `GET /api/v1/provider3/pricing-by-country?countryId=` — لكل خدمة الحقل **`operatorCount`** (عدد الفتحات). **`server=1`** يعني أول مشغّل مسموح، وهكذا.
 
 ### طلب رقم
 
 `GET /api/v1/provider3/get-number?apiKey=&country=&serviceCode=&server=1`  
-(المستخدمون: `server` مطلوب — نفس الفهرس من operators. الأدمن يمكنه `operator` الخام.)
+(`server` مطلوب — فهرس 1…N من `operatorCount`؛ **لا** يُقبل معرّف المشغّل الخام.)
 
 ### الرسائل
 
@@ -37,13 +47,20 @@ third_NUMBER_API_KEY=your_token_here
 
 ## مزامنة accessinfo (أدمن)
 
-- `GET /api/v1/provider3/access-sync?serviceCode=wa&interval=30min&serviceName=` (اختياري)
+- `GET /api/v1/provider3/access-sync?serviceCode=wa&interval=30min&serviceName=` (اختياري) — `serviceCode` يجب أن يطابق كوداً في `p3_services`.
 - `GET /api/v1/provider3/access-sync-all`
 
 ## تسعير حسب الدولة (واجهة مستخدم)
 
-`GET /api/v1/provider3/pricing-by-country?countryId=`
+`GET /api/v1/provider3/pricing-by-country?countryId=` — **`countryId`** = `p3_countries.id`.
 
 ---
 
-ترحيل من المخطط القديم: عند التشغيل يُنفَّذ `preTypeormMigrateProvider3` قبل TypeORM لمزامنة الأعمدة القديمة ثم إنشاء الجدول الجديد.
+## ترحيل قاعدة البيانات
+
+قبل `AppDataSource.initialize()` يُنفَّذ بالترتيب:
+
+1. **`preTypeormMigrateProvider3`** — نقل الأعمدة القديمة `provider3` من الجداول المشتركة وإنشاء `provider3_country_service_config` عند الحاجة (`src/script/preTypeormMigrateProvider3.js`).
+2. **`preTypeormMigrateP3Isolation`** — عزل بيانات P3 إلى `p3_countries` / `p3_services` وتحديث الإعداد والطلبات (`src/script/preTypeormMigrateP3Isolation.js`).
+
+بعدها يعمل TypeORM (مثل `synchronize`) على مواءمة المخطط مع الكيانات.

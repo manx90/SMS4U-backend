@@ -4,6 +4,8 @@
 
 **الكود:** وحدة معزولة تحت `src/modules/provider3/` (مسارات، `upstream.service.js`، `orderMessage.service.js`). الملف `src/api/third-Number.service.js` يعيد التصدير للتوافق مع الاستيرادات القديمة.
 
+**عزل البيانات:** الدول والخدمات الخاصة بـ P3 في جداول **`p3_countries`** و**`p3_services`**. في المعاملات المسماة `countryId` / `serviceId` (مثل `config/create` و`catalog/services`) القيم هي **معرّفات هذه الجداول**، وليست `countries.id` / `service.id`. التفاصيل والترحيل: `PROVIDER3_ADMIN_API.md`.
+
 ---
 
 ## 1) واجهة المزوّد الخارجي (Upstream — `modules/provider3/services/upstream.service.js`، alias: `third-Number.service.js`)
@@ -25,22 +27,21 @@
 | المسار | الطريقة | الصلاحية | المعاملات (Query) |
 |--------|---------|----------|-------------------|
 | `/provider3/get-message` | GET | مستخدم | **إلزامي:** `apiKey`, `orderId` — للطلبات التي `provider === 3` فقط (بديل مخصص عن `/order/get-message`). |
-| `/provider3/get-number` | GET | مستخدم (`requireUser`) + JWT / `apiKey` | **إلزامي:** `apiKey`, `country`, `serviceCode`. **أحد:** `server` (1,2,3…) أو `operatorIndex` — للمستخدم العادي **إلزامي** `server` (لا يُقبل `operator` الخام). للأدمن: إما `operator` خام أو فهرس عبر `server`/`operatorIndex`. |
-| `/provider3/countries-by-service` | GET | مستخدم | **إلزامي:** `serviceCode`. **اختياري:** `interval` — قائمة الدول/المشغّلين من آخر snapshot (بعد `access-sync`). |
-| `/provider3/operators` | GET | مستخدم | **إلزامي:** `serviceCode`, `country`. **اختياري:** `interval` (مثل `30min`) |
-| `/provider3/operators-count` | GET | مستخدم | نفس `operators` |
-| `/provider3/operator` | GET | مستخدم | **إلزامي:** `serviceCode`, `country`, `server` (فهرس ≥ 1). **اختياري:** `interval` |
-| `/provider3/pricing-by-country` | GET | مستخدم | **إلزامي:** `countryId` |
-| `/provider3/access-sync` | GET | أدمن | **إلزامي:** `serviceCode`. **اختياري:** `interval`, `serviceName` |
+| `/provider3/get-number` | GET | مستخدم (`requireUser`) + JWT / `apiKey` | **إلزامي:** `apiKey`, `country`, `serviceCode`, **`server`** (أو `operatorIndex`) — فهرس 1…N حيث N = عدد المشغّلين من `pricing-by-country` (`operatorCount`). **لا** يُقبل `operator` الخام. |
+| `/provider3/countries-by-service` | GET | مستخدم | **إلزامي:** `serviceCode`. **اختياري:** `interval` — قائمة الدول من آخر snapshot (بعد `access-sync`)، **بدون** كشف هوية المشغّل الخام. |
+| `/provider3/pricing-by-country` | GET | عام | **إلزامي:** `countryId` — معرّف **دولة P3** (`p3_countries.id`). يُرجع لكل خدمة **`operatorCount`** لبناء فهرس `server` 1…N |
+| `/provider3/access-sync` | GET | أدمن | **إلزامي:** `serviceCode` (كود من `p3_services`). **اختياري:** `interval`, `serviceName` |
 | `/provider3/access-sync-all` | GET | أدمن | — |
 | `/provider3/config` | GET | أدمن | — |
-| `/provider3/config/create` | GET | أدمن | **إلزامي:** `countryId`, `serviceId`, `price`, `upstreamCountryCode`, `upstreamServiceName` |
+| `/provider3/config/create` | GET | أدمن | **إلزامي:** `countryId`, `serviceId`, `price`, `upstreamCountryCode`, `upstreamServiceName` — `countryId`/`serviceId` من **`p3_countries` / `p3_services`** |
 | `/provider3/config/update` | GET | أدمن | **إلزامي:** `id`. **اختياري:** `price`, `upstreamCountryCode`, `upstreamServiceName` (واحد على الأقل للتحديث) |
 | `/provider3/config/remove` | GET | أدمن | **إلزامي:** `id` |
-| `/provider3/catalog/countries` | GET | مستخدم | — دول تظهر في إعداد P3 فقط (ليس كل دول النظام) |
-| `/provider3/catalog/services` | GET | مستخدم | **إلزامي:** `countryId` — خدمات + أسعار P3 لتلك الدولة |
-| `/provider3/admin/country-create` | GET | أدمن | **إلزامي:** `country`, `code_country` — إنشاء دولة بدون P1/P2 |
-| `/provider3/admin/service-create` | GET | أدمن | **إلزامي:** `servicename`, `code` — إنشاء خدمة بدون معرّفات P1/P2 |
+| `/provider3/catalog/countries` | GET | عام (بدون JWT/apiKey) | — دول P3 تظهر في إعداد P3 فقط |
+| `/provider3/catalog/services` | GET | عام | **اختياري:** `countryId` — بدونه: كل خدمة + `countries[]`؛ معه: خدمات دولة واحدة (قائمة مسطّحة) |
+| `/provider3/admin/country-create` | GET | أدمن | **إلزامي:** `country`, `code_country` — إنشاء في **`p3_countries`** |
+| `/provider3/admin/service-create` | GET | أدمن | **إلزامي:** `servicename`, `code` — إنشاء في **`p3_services`** |
+| `/provider3/admin/p3-catalog-countries` | GET | أدمن | — كل صفوف `p3_countries` (لقوائم الإدارة) |
+| `/provider3/admin/p3-catalog-services` | GET | أدمن | — كل صفوف `p3_services` (لقوائم الإدارة) |
 
 **ملاحظة:** طلب الرقم لمزوّد 3 **لا** يمر عبر `GET /api/v1/order/get-number` مع `provider=3` — يُرجَع خطأ يوجّه إلى `/provider3/get-number`.
 
@@ -63,10 +64,7 @@
 
 | الدالة | مسار axios |
 |--------|------------|
-| `getPricingByCountry` | GET `/provider3/pricing-by-country` |
-| `getProvider3Operators` | GET `/provider3/operators` |
-| `getProvider3OperatorsCount` | GET `/provider3/operators-count` |
-| `getProvider3Operator` | GET `/provider3/operator` |
+| `getPricingByCountry` | GET `/provider3/pricing-by-country` (يُرجع `operatorCount` لكل خدمة) |
 | `provider3AccessSync` | GET `/provider3/access-sync` |
 | `provider3AccessSyncAll` | GET `/provider3/access-sync-all` (timeout 120s) |
 | `getProvider3Number` | GET `/provider3/get-number` |
@@ -76,6 +74,8 @@
 | `configCreate` | GET `/provider3/config/create` |
 | `configUpdate` | GET `/provider3/config/update` |
 | `configRemove` | GET `/provider3/config/remove` |
+| `adminP3CatalogCountries` | GET `/provider3/admin/p3-catalog-countries` |
+| `adminP3CatalogServices` | GET `/provider3/admin/p3-catalog-services` |
 
 ---
 

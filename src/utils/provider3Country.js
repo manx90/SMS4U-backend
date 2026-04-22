@@ -1,9 +1,52 @@
 import {
-	getOne as getCountryById,
-	getByCodeCountry,
-} from "../repositories/country.repo.js";
-import { getByCode as getServiceByCode } from "../repositories/service.repo.js";
+	getOne as getP3CountryById,
+	getByCodeCountry as getP3CountryByCode,
+	getAll as getAllP3Countries,
+} from "../repositories/p3Country.repo.js";
+import { getByCode as getP3ServiceByCode } from "../repositories/p3Service.repo.js";
 import { getByCountryAndService } from "../repositories/provider3CountryService.repo.js";
+
+/** اسم الخدمة عند المزوّد (مثل WhatsApp) لاستدعاء accessinfo عند غياب اللقطات المحلية */
+export async function resolveUpstreamServiceNameForP3(
+	countryQuery,
+	serviceCode,
+) {
+	const svc = await getP3ServiceByCode(
+		String(serviceCode),
+	);
+	if (!svc) return "";
+
+	const q = String(countryQuery ?? "").trim();
+	if (!q) return "";
+
+	let countryFind =
+		(await getP3CountryByCode(q)) ||
+		(await getP3CountryByCode(q.toUpperCase()));
+	if (!countryFind && /^\d+$/.test(q)) {
+		countryFind = await getP3CountryById(
+			parseInt(q, 10),
+		);
+	}
+	if (!countryFind) {
+		const all = await getAllP3Countries();
+		countryFind =
+			all.find((c) => c.name === q) ||
+			all.find(
+				(c) =>
+					String(c.name || "").toLowerCase() ===
+					q.toLowerCase(),
+			);
+	}
+	if (!countryFind) return "";
+
+	const cfg = await getByCountryAndService(
+		countryFind.id,
+		svc.id,
+	);
+	if (!cfg) return "";
+	const n = cfg.upstreamServiceName?.trim();
+	return n || String(svc.name || "").trim();
+}
 
 export async function resolveCountryFilterForProvider3(
 	countryQuery,
@@ -13,12 +56,12 @@ export async function resolveCountryFilterForProvider3(
 	if (!countryFilter) return countryFilter;
 
 	if (/^\d+$/.test(countryFilter) && serviceCode) {
-		const svc = await getServiceByCode(
+		const svc = await getP3ServiceByCode(
 			String(serviceCode),
 		);
-		let cRow = await getByCodeCountry(countryFilter);
+		let cRow = await getP3CountryByCode(countryFilter);
 		if (!cRow) {
-			cRow = await getCountryById(
+			cRow = await getP3CountryById(
 				parseInt(countryFilter, 10),
 			);
 		}
@@ -34,9 +77,9 @@ export async function resolveCountryFilterForProvider3(
 			}
 		}
 	} else if (/^\d+$/.test(countryFilter)) {
-		let cRow = await getByCodeCountry(countryFilter);
+		let cRow = await getP3CountryByCode(countryFilter);
 		if (!cRow) {
-			cRow = await getCountryById(
+			cRow = await getP3CountryById(
 				parseInt(countryFilter, 10),
 			);
 		}

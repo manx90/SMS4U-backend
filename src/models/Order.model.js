@@ -105,21 +105,56 @@ const Order = new EntitySchema({
 		user: {
 			target: "User",
 			type: "many-to-one",
-			joinColumn: true,
+			joinColumn: {
+				name: "userId",
+				foreignKeyConstraintName: "FK_orders_userId",
+			},
+			inverseSide: "Order",
 			onDelete: "CASCADE",
 		},
 		service: {
 			target: "Service",
 			type: "many-to-one",
-			joinColumn: true,
+			joinColumn: {
+				name: "serviceId",
+				nullable: true,
+				foreignKeyConstraintName: "FK_orders_serviceId",
+			},
 			inverseSide: "orders",
-			onDelete: "CASCADE",
+			onDelete: "SET NULL",
 		},
 		country: {
 			target: "Country",
 			type: "many-to-one",
-			joinColumn: true,
-			onDelete: "CASCADE",
+			joinColumn: {
+				name: "countryId",
+				nullable: true,
+				foreignKeyConstraintName: "FK_orders_countryId",
+			},
+			inverseSide: "orders",
+			onDelete: "SET NULL",
+		},
+		p3Country: {
+			target: "P3Country",
+			type: "many-to-one",
+			joinColumn: {
+				name: "p3CountryId",
+				nullable: true,
+				foreignKeyConstraintName: "FK_orders_p3CountryId",
+			},
+			inverseSide: "orders",
+			onDelete: "SET NULL",
+		},
+		p3Service: {
+			target: "P3Service",
+			type: "many-to-one",
+			joinColumn: {
+				name: "p3ServiceId",
+				nullable: true,
+				foreignKeyConstraintName: "FK_orders_p3ServiceId",
+			},
+			inverseSide: "orders",
+			onDelete: "SET NULL",
 		},
 		reorders: {
 			target: "OrderReorder",

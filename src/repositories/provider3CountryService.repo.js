@@ -7,28 +7,28 @@ export const provider3ConfigRepository =
 		Provider3CountryServiceConfig,
 	);
 
-const cacheKey = (countryId, serviceId) =>
-	`p3config:${countryId}:${serviceId}`;
+const cacheKey = (p3CountryId, p3ServiceId) =>
+	`p3config:${p3CountryId}:${p3ServiceId}`;
 
 export const getByCountryAndService = async (
-	countryId,
-	serviceId,
+	p3CountryId,
+	p3ServiceId,
 ) => {
-	const key = cacheKey(countryId, serviceId);
+	const key = cacheKey(p3CountryId, p3ServiceId);
 	return await CacheService.get(key, async () => {
 		return await provider3ConfigRepository.findOne({
 			where: {
-				country: { id: countryId },
-				service: { id: serviceId },
+				p3Country: { id: p3CountryId },
+				p3Service: { id: p3ServiceId },
 			},
-			relations: { country: true, service: true },
+			relations: { p3Country: true, p3Service: true },
 		});
 	});
 };
 
 export const getAllWithRelations = async () => {
 	return await provider3ConfigRepository.find({
-		relations: { country: true, service: true },
+		relations: { p3Country: true, p3Service: true },
 		order: { id: "ASC" },
 	});
 };
@@ -36,7 +36,7 @@ export const getAllWithRelations = async () => {
 export const getOne = async (id) =>
 	await provider3ConfigRepository.findOne({
 		where: { id: parseInt(id, 10) },
-		relations: { country: true, service: true },
+		relations: { p3Country: true, p3Service: true },
 	});
 
 export const create = async (data) => {
@@ -69,13 +69,11 @@ export const remove = async (id) => {
 	return row;
 };
 
-/** One upstream service name per service code for /accessinfo cron. */
-/** Countries that appear in at least one P3 config row (for user catalog). */
 export const getConfiguredCountries = async () => {
 	const all = await getAllWithRelations();
 	const byId = new Map();
 	for (const row of all) {
-		const c = row.country;
+		const c = row.p3Country;
 		if (c?.id == null) continue;
 		if (!byId.has(c.id)) {
 			byId.set(c.id, {
@@ -92,7 +90,6 @@ export const getConfiguredCountries = async () => {
 	);
 };
 
-/** P3 pricing rows for one country (catalog services for that country). */
 export const getConfiguredServicesForCountry = async (
 	countryId,
 ) => {
@@ -102,16 +99,143 @@ export const getConfiguredServicesForCountry = async (
 	}
 	const all = await getAllWithRelations();
 	return all
-		.filter((r) => r.country?.id === cid)
+		.filter((r) => r.p3Country?.id === cid)
 		.map((r) => ({
 			configId: r.id,
-			serviceId: r.service?.id,
-			serviceCode: r.service?.code,
-			serviceName: r.service?.name,
+			serviceId: r.p3Service?.id,
+			serviceCode: r.p3Service?.code,
+			serviceName: r.p3Service?.name,
 			price: r.price,
 			upstreamCountryCode: r.upstreamCountryCode,
 			upstreamServiceName: r.upstreamServiceName,
 		}));
+};
+
+/** Every P3 service with all countries where it is configured (pricing rows). */
+export const getCatalogServicesGroupedByService = async () => {
+	const all = await getAllWithRelations();
+	const byServiceId = new Map();
+	for (const r of all) {
+		const svc = r.p3Service;
+		const c = r.p3Country;
+		if (!svc?.id || !c?.id) continue;
+		if (!byServiceId.has(svc.id)) {
+			byServiceId.set(svc.id, {
+				serviceId: svc.id,
+				serviceCode: svc.code,
+				serviceName: svc.name,
+				countries: [],
+			});
+		}
+		byServiceId.get(svc.id).countries.push({
+			countryId: c.id,
+			countryName: c.name,
+			code_country: c.code_country,
+			configId: r.id,
+			price: r.price,
+			upstreamCountryCode: r.upstreamCountryCode,
+			upstreamServiceName: r.upstreamServiceName,
+		});
+	}
+	const list = Array.from(byServiceId.values());
+	for (const item of list) {
+		item.countries.sort((a, b) =>
+			String(a.countryName || "").localeCompare(
+				String(b.countryName || ""),
+			),
+		);
+	}
+	return list.sort((a, b) =>
+		String(a.serviceName || "").localeCompare(
+			String(b.serviceName || ""),
+		),
+	);
+};
+
+/** Public catalog: only serviceCode + countryName + code_country per row. */
+export const getCatalogServicesPublic = async () => {
+	const all = await getAllWithRelations();
+	const byServiceCode = new Map();
+	for (const r of all) {
+		const svc = r.p3Service;
+		const c = r.p3Country;
+		if (!svc?.code || !c) continue;
+		const sc = String(svc.code).trim();
+		if (!byServiceCode.has(sc)) {
+			byServiceCode.set(sc, {
+				serviceCode: sc,
+				countries: [],
+			});
+		}
+		const bucket = byServiceCode.get(sc);
+		const cc = String(c.code_country || "").trim();
+		const exists = bucket.countries.some(
+			(x) =>
+				String(x.code_country || "")
+					.toLowerCase() === cc.toLowerCase(),
+		);
+		if (!exists) {
+			bucket.countries.push({
+				countryName: String(c.name || "").trim(),
+				code_country: cc,
+			});
+		}
+	}
+	const list = Array.from(byServiceCode.values());
+	for (const item of list) {
+		item.countries.sort((a, b) =>
+			String(a.countryName || "").localeCompare(
+				String(b.countryName || ""),
+			),
+		);
+	}
+	return list.sort((a, b) =>
+		String(a.serviceCode || "").localeCompare(
+			String(b.serviceCode || ""),
+		),
+	);
+};
+
+export const getCatalogServicesPublicForCountry = async (
+	countryId,
+) => {
+	const cid = parseInt(countryId, 10);
+	if (!Number.isFinite(cid)) {
+		throw new Error("Invalid countryId");
+	}
+	const all = await getAllWithRelations();
+	const byServiceCode = new Map();
+	for (const r of all) {
+		if (r.p3Country?.id !== cid) continue;
+		const svc = r.p3Service;
+		const c = r.p3Country;
+		if (!svc?.code || !c) continue;
+		const sc = String(svc.code).trim();
+		if (!byServiceCode.has(sc)) {
+			byServiceCode.set(sc, {
+				serviceCode: sc,
+				countries: [],
+			});
+		}
+		const bucket = byServiceCode.get(sc);
+		const cc = String(c.code_country || "").trim();
+		const exists = bucket.countries.some(
+			(x) =>
+				String(x.code_country || "")
+					.toLowerCase() === cc.toLowerCase(),
+		);
+		if (!exists) {
+			bucket.countries.push({
+				countryName: String(c.name || "").trim(),
+				code_country: cc,
+			});
+		}
+	}
+	return Array.from(byServiceCode.values()).sort((a, b) =>
+		String(a.serviceCode || "").localeCompare(
+			String(b.serviceCode || ""),
+		),
+	);
 };
 
 export const getDistinctServicesForAccessSync =
@@ -124,7 +248,7 @@ export const getDistinctServicesForAccessSync =
 				"MIN(cfg.upstreamServiceName)",
 				"upstreamServiceName",
 			)
-			.innerJoin("cfg.service", "srv")
+			.innerJoin("cfg.p3Service", "srv")
 			.groupBy("srv.id")
 			.addGroupBy("srv.code")
 			.getRawMany();

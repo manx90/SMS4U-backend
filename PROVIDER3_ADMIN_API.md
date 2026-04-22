@@ -6,12 +6,36 @@
 
 ---
 
+## 0) نموذج البيانات — عزل P3 عن المزوّدين 1 و 2
+
+المزوّد الثالث **لا** يعتمد على جداول `countries` و`service` المشتركة.
+
+| الجدول | الوصف |
+|--------|--------|
+| `p3_countries` | دول خاصة بـ P3: `id`, `name`, `code_country` (فريد). |
+| `p3_services` | خدمات خاصة بـ P3: `id`, `name`, `code` (فريد). |
+| `provider3_country_service_config` | ربط دولة P3 + خدمة P3: السعر، `upstreamCountryCode`, `upstreamServiceName` (أعمدة FK: `p3CountryId`, `p3ServiceId`). |
+| `orders` (عند `provider = 3`) | يُفضَّل ربط الطلب بـ `p3CountryId` و`p3ServiceId`؛ حقول `countryId` و`serviceId` تكون `NULL` لطلبات P3. |
+
+**ترحيل قاعدة البيانات:** قبل تهيئة TypeORM يُنفَّذ بالترتيب:
+
+1. `preTypeormMigrateProvider3` — نقل أعمدة `provider3` القديمة من الجداول المشتركة وإنشاء `provider3_country_service_config` إن لزم.
+2. `preTypeormMigrateP3Isolation` — إنشاء `p3_countries` / `p3_services`، نقل بيانات الإعداد من الربط القديم (`countryId`/`serviceId` على الجداول المشتركة) إلى أعمدة P3، وتحديث طلبات `provider = 3` لتعبئة `p3CountryId`/`p3ServiceId` وإفراغ `countryId`/`serviceId` عند الحاجة.
+
+السكربت: `src/script/preTypeormMigrateP3Isolation.js`.
+
+**مهم في المعاملات:** في `config/create` و`catalog/services` و`pricing-by-country`، **`countryId` و`serviceId` هما معرّفان من جداول P3** (`p3_countries.id` و`p3_services.id`)، وليسا معرّفات `countries` / `service`.
+
+**استجابة `GET /provider3/config`:** لكل صف يُعاد `p3Country` و`p3Service`؛ وللتوافق مع الواجهات يُعاد أيضاً **`country`** و**`service`** كنسخة من نفس كائنات P3 (ليس من الجداول المشتركة).
+
+---
+
 ## 1) إعداد السعر والربط (جدول `provider3_country_service_config`)
 
 | الطلب | الوصف |
 |--------|--------|
-| `GET /provider3/config` | قائمة كل الصفوف (دولة، خدمة، سعر، أكواد المزوّد). |
-| `GET /provider3/config/create` | **إلزامي:** `countryId`, `serviceId`, `price`, `upstreamCountryCode`, `upstreamServiceName` |
+| `GET /provider3/config` | قائمة كل الصفوف (دولة P3، خدمة P3، سعر، أكواد المزوّد الخارجي). |
+| `GET /provider3/config/create` | **إلزامي:** `countryId`, `serviceId`, `price`, `upstreamCountryCode`, `upstreamServiceName` — حيث `countryId` = `p3_countries.id` و`serviceId` = `p3_services.id`. |
 | `GET /provider3/config/update` | **إلزامي:** `id`. **اختياري:** `price`, `upstreamCountryCode`, `upstreamServiceName` |
 | `GET /provider3/config/remove` | **إلزامي:** `id` |
 
@@ -21,48 +45,64 @@
 GET /api/v1/provider3/config/create?countryId=1&serviceId=2&price=1.5&upstreamCountryCode=IT&upstreamServiceName=facebook
 ```
 
+(القيم `1` و`2` هنا معرّفات من `p3_countries` و`p3_services`.)
+
 ---
 
-## 2) إنشاء دولة / خدمة بمسار P3 فقط (بدون حقول المزوّد 1 و 2)
+## 2) إنشاء دولة / خدمة خاصة بـ P3 فقط
 
-يُنشئان سجلات في جداول `countries` و `service` لكن **بدون** تعبئة `provider1` / `provider2` — مناسب لمسار المزوّد الثالث وحده.
+يُنشئان سجلات في **`p3_countries`** و**`p3_services`** — منفصلة تماماً عن جداول المزوّدين 1 و 2.
 
 | الطلب | المعاملات |
 |--------|-----------|
-| `GET /provider3/admin/country-create` | **إلزامي:** `country` (الاسم)، `code_country` (مثل IT) |
-| `GET /provider3/admin/service-create` | **إلزامي:** `servicename`, `code` (كود فريد للخدمة) |
+| `GET /provider3/admin/country-create` | **إلزامي:** `country` (اسم الدولة)، `code_country` (مثل IT) |
+| `GET /provider3/admin/service-create` | **إلزامي:** `servicename`, `code` (كود فريد للخدمة ضمن P3) |
 
-بعدها أضف صف إعداد عبر `config/create` لربط الدولة والخدمة بالسعر وأسماء المزوّد.
+بعدها أضف صف إعداد عبر `config/create` لربط **معرّف الدولة P3** و**معرّف الخدمة P3** بالسعر وأسماء المزوّد الخارجي.
 
 ---
 
-## 3) مزامنة accessinfo (لقطات المشغّلين)
+## 3) قوائم كاملة للأدمن (كتالوج P3 — لاختيار الدولة/الخدمة في النماذج)
+
+تعيد **كل** سجلات P3 (وليس فقط ما له إعداد تسعير)، مناسبة لقوائم الإنشاء في لوحة الإدارة.
+
+| الطلب | الوصف |
+|--------|--------|
+| `GET /provider3/admin/p3-catalog-countries` | جميع الصفوف من `p3_countries`. |
+| `GET /provider3/admin/p3-catalog-services` | جميع الصفوف من `p3_services`. |
+
+---
+
+## 4) مزامنة accessinfo (لقطات المشغّلين)
 
 | الطلب | المعاملات |
 |--------|-----------|
-| `GET /provider3/access-sync` | **إلزامي:** `serviceCode`. **اختياري:** `interval` (مثل `30min`)، `serviceName` |
-| `GET /provider3/access-sync-all` | مزامنة كل الخدمات المعرّفة في الإعداد |
+| `GET /provider3/access-sync` | **إلزامي:** `serviceCode` (كود خدمة من `p3_services`). **اختياري:** `interval` (مثل `30min`)، `serviceName` |
+| `GET /provider3/access-sync-all` | مزامنة كل الخدمات المعرّفة في إعداد P3 |
 
 ---
 
-## 4) كتالوج للمستخدم (قراءة فقط — مستخدم مسجّل)
+## 5) كتالوج (قراءة عامة — بدون JWT أو apiKey)
 
-يُستخدَم لعرض **دول وخدمات لها إعداد P3 فقط** (وليس كل الدول في النظام).
+مسارات القراءة التالية **عامة** لتسهيل الاختبار من curl/Postman؛ لا تتطلب `Authorization` ولا مفتاح API.
+
+يُستخدَم لعرض **دول وخدمات لها إعداد P3 فقط** في مساري `catalog/*` (وليس كل سجلات P3 في النظام).
 
 | الطلب | المعاملات |
 |--------|-----------|
-| `GET /provider3/catalog/countries` | — يعيد دولاً مميزة تظهر في `provider3_country_service_config` |
-| `GET /provider3/catalog/services` | **إلزامي:** `countryId` — خدمات وأسعار P3 لهذه الدولة |
+| `GET /provider3/catalog/countries` | — يعيد دولاً مميزة تظهر في `provider3_country_service_config` (من `p3_countries`). |
+| `GET /provider3/catalog/services` | **اختياري:** `countryId`. بدون معامل: كل خدمة مع مصفوفة `countries` (الدول المسموحة لها). مع `countryId`: قائمة مسطّحة لخدمات تلك الدولة فقط (كالسلوك السابق). |
+| `GET /provider3/pricing-by-country` | **إلزامي:** `countryId` — معرّف دولة P3؛ قائمة أسعار مبسّطة لخدمات تلك الدولة. |
 
 ---
 
-## 5) بقية مسارات المزوّد 3 (مرجع سريع)
+## 6) بقية مسارات المزوّد 3 (مرجع سريع)
 
 راجع أيضاً `PROVIDER3_API_REQUESTS.md` لـ: `get-number`, `get-message`, `operators`, `countries-by-service`, إلخ.
 
 ---
 
-## 6) ملاحظات
+## 7) ملاحظات
 
 - الطلبات الناجحة غالباً `{ state: "200", data: ... }` أو `201` عند الإنشاء.  
 - الأخطاء: `{ state: "400"|"500", error: "..." }`.  

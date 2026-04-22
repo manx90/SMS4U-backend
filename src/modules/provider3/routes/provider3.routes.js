@@ -1,11 +1,14 @@
 import { createProvider3Order } from "../../../repositories/order.repo.js";
 import {
 	replaceSnapshotsForService,
-	findOperatorsForCountry,
+	findOperatorsForCountryWithFallback,
 	resolveOperatorByIndex,
 	findByServiceAndInterval,
 } from "../../../repositories/provider3Access.repo.js";
-import { resolveCountryFilterForProvider3 } from "../../../utils/provider3Country.js";
+import {
+	resolveCountryFilterForProvider3,
+	resolveUpstreamServiceNameForP3,
+} from "../../../utils/provider3Country.js";
 import upstream from "../services/upstream.service.js";
 import { handleProvider3GetMessage } from "../services/orderMessage.service.js";
 import Provider3AccessSync from "../../../services/Provider3AccessSync.js";
@@ -17,17 +20,26 @@ import {
 	getAllWithRelations,
 	getDistinctServicesForAccessSync,
 	getConfiguredCountries,
-	getConfiguredServicesForCountry,
+	getCatalogServicesPublic,
+	getCatalogServicesPublicForCountry,
 	create as createP3Config,
 	update as updateP3Config,
 	remove as removeP3Config,
 } from "../../../repositories/provider3CountryService.repo.js";
 import {
-	getByCode as getServiceByCode,
-	create as createServiceEntity,
-} from "../../../repositories/service.repo.js";
-import { create as createCountry } from "../../../repositories/country.repo.js";
+	getByCode as getP3ServiceByCode,
+	getByName as getP3ServiceByName,
+	create as createP3ServiceRow,
+} from "../../../repositories/p3Service.repo.js";
+import {
+	create as createP3Country,
+	getAll as getAllP3Countries,
+	getByCodeCountry as getP3CountryByCode,
+	getByName as getP3CountryByName,
+} from "../../../repositories/p3Country.repo.js";
+import { getAll as getAllP3Services } from "../../../repositories/p3Service.repo.js";
 import logger from "../../../utils/logger.js";
+import { sendMappedError } from "../../../utils/apiErrorResponse.js";
 
 export const provider3Route = async (app) => {
 	app.get("/get-message", {
@@ -74,7 +86,6 @@ export const provider3Route = async (app) => {
 				});
 			}
 
-			const isAdmin = request.user?.role === "admin";
 			const hasRaw =
 				operator !== undefined &&
 				operator !== null &&
@@ -86,57 +97,47 @@ export const provider3Route = async (app) => {
 
 			let resolvedOperatorThird = null;
 			try {
-				if (isAdmin) {
-					if (hasRaw) {
-						resolvedOperatorThird =
-							String(operator).trim();
-					} else if (hasIndex) {
-						const countryF =
-							await resolveCountryFilterForProvider3(
-								country,
-								String(serviceCode),
-							);
-						resolvedOperatorThird =
-							await resolveOperatorByIndex(
-								String(serviceCode),
-								String(accessInfoInterval),
-								countryF,
-								serverSlotRaw,
-							);
-					}
-				} else {
-					if (hasRaw) {
-						return reply.status(400).send({
-							state: "400",
-							error:
-								"Use server (1, 2, 3, …) for provider 3; raw operator is not accepted for client requests",
-						});
-					}
-					if (!hasIndex) {
-						return reply.status(400).send({
-							state: "400",
-							error:
-								"server is required (1 = Server 1, 2 = Server 2, …)",
-						});
-					}
-					const countryF =
-						await resolveCountryFilterForProvider3(
-							country,
-							String(serviceCode),
-						);
-					resolvedOperatorThird =
-						await resolveOperatorByIndex(
-							String(serviceCode),
-							String(accessInfoInterval),
-							countryF,
-							serverSlotRaw,
-						);
+				if (hasRaw) {
+					return reply.status(400).send({
+						state: "400",
+						error:
+							"Use server (1, 2, 3, …) for operator index only; raw operator id is not accepted",
+					});
 				}
+				if (!hasIndex) {
+					return reply.status(400).send({
+						state: "400",
+						error:
+							"server is required (1 = first operator, 2 = second, …)",
+					});
+				}
+				const countryF =
+					await resolveCountryFilterForProvider3(
+						country,
+						String(serviceCode),
+					);
+				const upstreamName =
+					await resolveUpstreamServiceNameForP3(
+						country,
+						String(serviceCode),
+					);
+				resolvedOperatorThird =
+					await resolveOperatorByIndex(
+						String(serviceCode),
+						String(accessInfoInterval),
+						countryF,
+						serverSlotRaw,
+						upstreamName,
+					);
 			} catch (e) {
-				return reply.status(400).send({
-					state: "400",
-					error: e.message || "Invalid operator selection",
-				});
+				return sendMappedError(
+					reply,
+					e,
+					logger,
+					{
+						route: "provider3.get-number.resolve-operator",
+					},
+				);
 			}
 
 			if (
@@ -145,9 +146,8 @@ export const provider3Route = async (app) => {
 			) {
 				return reply.status(400).send({
 					state: "400",
-					error: isAdmin
-						? "operator or server is required for provider 3"
-						: "server is required when provider is 3 (1, 2, 3, …)",
+					error:
+						"server is required for provider 3 (1, 2, 3, …)",
 				});
 			}
 
@@ -335,13 +335,13 @@ export const provider3Route = async (app) => {
 						error: "serviceCode is required",
 					});
 				}
-				const svc = await getServiceByCode(
+				const svc = await getP3ServiceByCode(
 					String(serviceCode),
 				);
 				if (!svc) {
 					return res.status(404).send({
 						state: "404",
-						error: "Service not found",
+						error: "P3 service not found",
 					});
 				}
 				const distinct =
@@ -379,11 +379,12 @@ export const provider3Route = async (app) => {
 					},
 				});
 			} catch (e) {
-				console.error(e);
-				return res.status(400).send({
-					state: "400",
-					error: e.message,
-				});
+				return sendMappedError(
+					res,
+					e,
+					logger,
+					{ route: "provider3.access-sync" },
+				);
 			}
 		},
 	});
@@ -427,13 +428,12 @@ export const provider3Route = async (app) => {
 					data: result,
 				});
 			} catch (e) {
-				console.error(e);
-				return res.status(500).send({
-					state: "500",
-					error:
-						e.message ||
-						"Provider 3 full sync failed",
-				});
+				return sendMappedError(
+					res,
+					e,
+					logger,
+					{ route: "provider3.access-sync-all" },
+				);
 			}
 		},
 	});
@@ -466,7 +466,6 @@ export const provider3Route = async (app) => {
 				const data = rows.map((r) => ({
 					country: r.countryName,
 					ccode: r.ccode,
-					operator: r.operator,
 					accessCount: r.accessCount,
 				}));
 				return res.send({
@@ -484,7 +483,6 @@ export const provider3Route = async (app) => {
 	});
 
 	app.get("/catalog/countries", {
-		preHandler: requireUser(),
 		handler: async (req, res) => {
 			try {
 				const data = await getConfiguredCountries();
@@ -493,38 +491,46 @@ export const provider3Route = async (app) => {
 					data,
 				});
 			} catch (e) {
-				return res.status(500).send({
-					state: "500",
-					error: e.message,
-				});
+				return sendMappedError(
+					res,
+					e,
+					logger,
+					{ route: "provider3.catalog.countries" },
+				);
 			}
 		},
 	});
 
 	app.get("/catalog/services", {
-		preHandler: requireUser(),
 		handler: async (req, res) => {
 			try {
 				const { countryId } = req.query;
-				if (!countryId) {
-					return res.status(400).send({
-						state: "400",
-						error: "countryId is required",
+				if (
+					countryId !== undefined &&
+					countryId !== null &&
+					String(countryId).trim() !== ""
+				) {
+					const data =
+						await getCatalogServicesPublicForCountry(
+							countryId,
+						);
+					return res.send({
+						state: "200",
+						data,
 					});
 				}
-				const data =
-					await getConfiguredServicesForCountry(
-						countryId,
-					);
+				const data = await getCatalogServicesPublic();
 				return res.send({
 					state: "200",
 					data,
 				});
 			} catch (e) {
-				return res.status(400).send({
-					state: "400",
-					error: e.message,
-				});
+				return sendMappedError(
+					res,
+					e,
+					logger,
+					{ route: "provider3.catalog.services" },
+				);
 			}
 		},
 	});
@@ -546,24 +552,48 @@ export const provider3Route = async (app) => {
 							"country and code_country are required (P3-only: no provider1/2)",
 					});
 				}
-				const row = await createCountry({
-					country: String(country).trim(),
-					code_country: String(
-						code_country,
-					).trim(),
-					provider1: null,
-					provider2: null,
+				const nameTrim = String(country).trim();
+				const codeTrim = String(code_country).trim();
+				const dupCode =
+					await getP3CountryByCode(codeTrim);
+				if (dupCode) {
+					return res.status(409).send({
+						state: "409",
+						error:
+							"This country code already exists.",
+					});
+				}
+				const dupName =
+					await getP3CountryByName(nameTrim);
+				if (dupName) {
+					return res.status(409).send({
+						state: "409",
+						error:
+							"A country with this name already exists.",
+					});
+				}
+				const row = await createP3Country({
+					name: nameTrim,
+					code_country: codeTrim,
 				});
 				return res.status(201).send({
 					state: "201",
-					msg: "Country created (Provider 3 path — no P1/P2 fields)",
-					data: row,
+					data: {
+						name: row.name,
+						code_country: row.code_country,
+						id: row.id,
+					},
 				});
 			} catch (e) {
-				return res.status(400).send({
-					state: "400",
-					error: e.message,
-				});
+				return sendMappedError(
+					res,
+					e,
+					logger,
+					{
+						kind: "p3_country",
+						route: "provider3.admin.country-create",
+					},
+				);
 			}
 		},
 	});
@@ -585,63 +615,79 @@ export const provider3Route = async (app) => {
 							"servicename and code are required (P3-only: empty P1/P2)",
 					});
 				}
-				const row = await createServiceEntity({
-					name: String(servicename).trim(),
-					code: String(code).trim(),
-					provider1: "",
-					provider2: "",
+				const nameTrim = String(servicename).trim();
+				const codeTrim = String(code).trim();
+				const dupCode =
+					await getP3ServiceByCode(codeTrim);
+				if (dupCode) {
+					return res.status(409).send({
+						state: "409",
+						error:
+							"This service code already exists.",
+					});
+				}
+				const dupName =
+					await getP3ServiceByName(nameTrim);
+				if (dupName) {
+					return res.status(409).send({
+						state: "409",
+						error:
+							"A service with this name already exists.",
+					});
+				}
+				const row = await createP3ServiceRow({
+					name: nameTrim,
+					code: codeTrim,
 				});
 				return res.status(201).send({
 					state: "201",
-					msg: "Service created (Provider 3 path — no P1/P2 ids)",
-					data: row,
+					data: {
+						name: row.name,
+						code: row.code,
+						id: row.id,
+					},
 				});
 			} catch (e) {
-				return res.status(400).send({
-					state: "400",
-					error: e.message,
-				});
+				return sendMappedError(
+					res,
+					e,
+					logger,
+					{
+						kind: "p3_service",
+						route: "provider3.admin.service-create",
+					},
+				);
 			}
 		},
 	});
 
-	app.get("/operators", {
-		preHandler: requireUser(),
+	app.get("/admin/p3-catalog-countries", {
+		preHandler: requireAdmin(),
 		handler: async (req, res) => {
 			try {
-				const { serviceCode, country, interval } =
-					req.query;
-				if (!serviceCode || !country) {
-					return res.status(400).send({
-						state: "400",
-						error:
-							"serviceCode and country are required",
-					});
-				}
-				const snapshotInterval =
-					interval != null &&
-					String(interval).trim() !== ""
-						? String(interval).trim()
-						: process.env
-								.PROVIDER3_ACCESS_INFO_INTERVAL ||
-							"30min";
-				const countryFilter =
-					await resolveCountryFilterForProvider3(
-						country,
-						String(serviceCode),
-					);
-				const list = await findOperatorsForCountry(
-					String(serviceCode),
-					snapshotInterval,
-					countryFilter,
+				const data = await getAllP3Countries();
+				return res.send({
+					state: "200",
+					data,
+				});
+			} catch (e) {
+				return sendMappedError(
+					res,
+					e,
+					logger,
+					{
+						route: "provider3.admin.p3-catalog-countries",
+					},
 				);
-				const isAdmin = req.user?.role === "admin";
-				const data = isAdmin
-					? list
-					: list.map((_, i) => ({
-							label: `Server ${i + 1}`,
-							index: i + 1,
-						}));
+			}
+		},
+	});
+
+	app.get("/admin/p3-catalog-services", {
+		preHandler: requireAdmin(),
+		handler: async (req, res) => {
+			try {
+				const data = await getAllP3Services();
 				return res.send({
 					state: "200",
 					data,
@@ -655,107 +701,7 @@ export const provider3Route = async (app) => {
 		},
 	});
 
-	app.get("/operators-count", {
-		preHandler: requireUser(),
-		handler: async (req, res) => {
-			try {
-				const { serviceCode, country, interval } =
-					req.query;
-				if (!serviceCode || !country) {
-					return res.status(400).send({
-						state: "400",
-						error:
-							"serviceCode and country are required",
-					});
-				}
-				const snapshotInterval =
-					interval != null &&
-					String(interval).trim() !== ""
-						? String(interval).trim()
-						: process.env
-								.PROVIDER3_ACCESS_INFO_INTERVAL ||
-							"30min";
-				const countryFilter =
-					await resolveCountryFilterForProvider3(
-						country,
-						String(serviceCode),
-					);
-				const list = await findOperatorsForCountry(
-					String(serviceCode),
-					snapshotInterval,
-					countryFilter,
-				);
-				return res.send({
-					state: "200",
-					data: { count: list.length },
-				});
-			} catch (e) {
-				return res.status(500).send({
-					state: "500",
-					error: e.message,
-				});
-			}
-		},
-	});
-
-	app.get("/operator", {
-		preHandler: requireUser(),
-		handler: async (req, res) => {
-			try {
-				const { serviceCode, country, server, interval } =
-					req.query;
-				if (
-					!serviceCode ||
-					!country ||
-					server == null ||
-					String(server).trim() === ""
-				) {
-					return res.status(400).send({
-						state: "400",
-						error:
-							"serviceCode, country, and server are required",
-					});
-				}
-				const snapshotInterval =
-					interval != null &&
-					String(interval).trim() !== ""
-						? String(interval).trim()
-						: process.env
-								.PROVIDER3_ACCESS_INFO_INTERVAL ||
-							"30min";
-				const countryFilter =
-					await resolveCountryFilterForProvider3(
-						country,
-						String(serviceCode),
-					);
-				const index1 = parseInt(String(server), 10);
-				if (!Number.isFinite(index1) || index1 < 1) {
-					return res.status(400).send({
-						state: "400",
-						error: "Invalid server index",
-					});
-				}
-				const operator = await resolveOperatorByIndex(
-					String(serviceCode),
-					snapshotInterval,
-					countryFilter,
-					index1,
-				);
-				return res.send({
-					state: "200",
-					data: { operator, index: index1 },
-				});
-			} catch (e) {
-				return res.status(400).send({
-					state: "400",
-					error: e.message,
-				});
-			}
-		},
-	});
-
 	app.get("/pricing-by-country", {
-		preHandler: requireUser(),
 		handler: async (req, res) => {
 			try {
 				const { countryId } = req.query;
@@ -767,22 +713,57 @@ export const provider3Route = async (app) => {
 				}
 				const all = await getAllWithRelations();
 				const cid = parseInt(countryId, 10);
-				const data = all
-					.filter((r) => r.country?.id === cid)
-					.map((r) => ({
-						serviceCode: r.service?.code,
-						serviceName: r.service?.name,
-						price: r.price,
-					}));
+				const accessInfoInterval =
+					process.env.PROVIDER3_ACCESS_INFO_INTERVAL ||
+					"30min";
+				const filtered = all.filter(
+					(r) => r.p3Country?.id === cid,
+				);
+				const data = await Promise.all(
+					filtered.map(async (r) => {
+						const serviceCode = String(
+							r.p3Service?.code || "",
+						);
+						const cc = String(
+							r.p3Country?.code_country || "",
+						).trim();
+						let operatorCount = 0;
+						try {
+							const countryFilter =
+								await resolveCountryFilterForProvider3(
+									cc,
+									serviceCode,
+								);
+							const list =
+								await findOperatorsForCountryWithFallback(
+									serviceCode,
+									accessInfoInterval,
+									countryFilter,
+									r.upstreamServiceName,
+								);
+							operatorCount = list.length;
+						} catch {
+							operatorCount = 0;
+						}
+						return {
+							serviceCode: r.p3Service?.code,
+							serviceName: r.p3Service?.name,
+							price: r.price,
+							operatorCount,
+						};
+					}),
+				);
 				return res.send({
 					state: "200",
 					data,
 				});
 			} catch (e) {
-				return res.status(500).send({
-					state: "500",
-					error: e.message,
-				});
+				return sendMappedError(
+					res,
+					e,
+					logger,
+					{ route: "provider3.pricing-by-country" },
+				);
 			}
 		},
 	});
@@ -792,15 +773,22 @@ export const provider3Route = async (app) => {
 		handler: async (req, res) => {
 			try {
 				const rows = await getAllWithRelations();
+				const data = rows.map((r) => ({
+					...r,
+					country: r.p3Country ?? null,
+					service: r.p3Service ?? null,
+				}));
 				return res.send({
 					state: "200",
-					data: rows,
+					data,
 				});
 			} catch (e) {
-				return res.status(500).send({
-					state: "500",
-					error: e.message,
-				});
+				return sendMappedError(
+					res,
+					e,
+					logger,
+					{ route: "provider3.config" },
+				);
 			}
 		},
 	});
@@ -837,8 +825,12 @@ export const provider3Route = async (app) => {
 					});
 				}
 				const row = await createP3Config({
-					country: { id: parseInt(countryId, 10) },
-					service: { id: parseInt(serviceId, 10) },
+					p3Country: {
+						id: parseInt(countryId, 10),
+					},
+					p3Service: {
+						id: parseInt(serviceId, 10),
+					},
 					price: p,
 					upstreamCountryCode: String(
 						upstreamCountryCode,
@@ -852,10 +844,15 @@ export const provider3Route = async (app) => {
 					data: row,
 				});
 			} catch (e) {
-				return res.status(400).send({
-					state: "400",
-					error: e.message,
-				});
+				return sendMappedError(
+					res,
+					e,
+					logger,
+					{
+						kind: "p3_config",
+						route: "provider3.config.create",
+					},
+				);
 			}
 		},
 	});
@@ -909,10 +906,15 @@ export const provider3Route = async (app) => {
 					data: row,
 				});
 			} catch (e) {
-				return res.status(400).send({
-					state: "400",
-					error: e.message,
-				});
+				return sendMappedError(
+					res,
+					e,
+					logger,
+					{
+						kind: "p3_config",
+						route: "provider3.config.update",
+					},
+				);
 			}
 		},
 	});
@@ -934,10 +936,15 @@ export const provider3Route = async (app) => {
 					data: row,
 				});
 			} catch (e) {
-				return res.status(400).send({
-					state: "400",
-					error: e.message,
-				});
+				return sendMappedError(
+					res,
+					e,
+					logger,
+					{
+						kind: "p3_config",
+						route: "provider3.config.remove",
+					},
+				);
 			}
 		},
 	});

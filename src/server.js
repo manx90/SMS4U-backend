@@ -14,9 +14,15 @@ import {
 import BackgroundService from "./services/BackgroundService.js";
 import { setupDefaultAdmin } from "./script/admin-config.js";
 import { preTypeormMigrateProvider3 } from "./script/preTypeormMigrateProvider3.js";
+import { preTypeormMigrateP3Isolation } from "./script/preTypeormMigrateP3Isolation.js";
 import cors from "@fastify/cors";
+import { injectApiKeyIntoQuery } from "./utils/requestApiKey.js";
 dotenv.config();
 const app = Fastify({ logger: false });
+
+app.addHook("preHandler", async (request) => {
+	injectApiKeyIntoQuery(request);
+});
 app.register(fastifyCompress, {
 	global: true,
 	encodings: ["br", "gzip", "deflate"],
@@ -160,6 +166,7 @@ async function startServer() {
 		});
 
 		await preTypeormMigrateProvider3();
+		await preTypeormMigrateP3Isolation();
 
 		// Initialize database first
 		await AppDataSource.initialize();
@@ -238,6 +245,7 @@ if (isPrimary && shouldUseCluster) {
 
 	// Initialize database and start background services in primary process
 	preTypeormMigrateProvider3()
+		.then(() => preTypeormMigrateP3Isolation())
 		.then(() => AppDataSource.initialize())
 		.then(async () => {
 			console.log(

@@ -10,11 +10,15 @@ import OrderReorder from "./OrderReorder.model.js";
 import PaymentInvoice from "./PaymentInvoice.model.js";
 import Provider3AccessSnapshot from "./Provider3AccessSnapshot.model.js";
 import Provider3CountryServiceConfig from "./Provider3CountryServiceConfig.model.js";
+import P3Country from "./P3Country.model.js";
+import P3Service from "./P3Service.model.js";
 
 export const entities = [
 	User,
 	Service,
 	Country,
+	P3Country,
+	P3Service,
 	Order,
 	OrderReorder,
 	CountryServicePricing,

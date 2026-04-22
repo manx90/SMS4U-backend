@@ -44,6 +44,28 @@ function logOutgoing(method, url, params) {
 	console.log("[provider3-upstream]", method, safe);
 }
 
+/** Raw HTTP body from the third-party provider (not SMS4U API). */
+function logP3ProviderResponse(label, response) {
+	if (!response) return;
+	const status = response.status;
+	const data = response.data;
+	const text =
+		typeof data === "string"
+			? data
+			: JSON.stringify(data, null, 2);
+	console.log(
+		`[P3 provider HTTP response] ${label}\nstatus=${status}\n${text}`,
+	);
+}
+
+/** مزوّد accessinfo قد يعيد دولاً مختلفة لـ Whatsapp مقابل WhatsApp */
+function normalizeAccessInfoServiceName(name) {
+	const t = String(name ?? "").trim();
+	if (!t) return t;
+	if (t.toLowerCase() === "whatsapp") return "WhatsApp";
+	return t;
+}
+
 class Provider3UpstreamService {
 	constructor() {
 		this.apiKey = process.env.third_NUMBER_API_KEY;
@@ -89,6 +111,7 @@ class Provider3UpstreamService {
 			},
 		});
 
+		logP3ProviderResponse("get_numbers", response);
 		const data = response?.data;
 		if (response.status >= 400) {
 			const msg =
@@ -139,6 +162,14 @@ class Provider3UpstreamService {
 				"Cache-Control": "no-cache",
 			},
 		});
+		if (
+			process.env.PROVIDER3_LOG_GET_MESSAGES === "1"
+		) {
+			logP3ProviderResponse(
+				"get_messages",
+				response,
+			);
+		}
 		return response;
 	}
 
@@ -247,10 +278,20 @@ class Provider3UpstreamService {
 				"Cannot derive accessinfo URL from third_NUMBER_API_URL",
 			);
 		}
+		const serviceParam =
+			normalizeAccessInfoServiceName(serviceName);
+		if (
+			String(serviceName ?? "").trim() !==
+			serviceParam
+		) {
+			console.log(
+				`[P3 provider] accessinfo service normalized: "${String(serviceName).trim()}" → "${serviceParam}"`,
+			);
+		}
 		const url = `${base}/accessinfo`;
 		const params = {
 			interval,
-			service: serviceName,
+			service: serviceParam,
 			token: this.apiKey,
 		};
 		logOutgoing("GET", url, params);
@@ -266,6 +307,10 @@ class Provider3UpstreamService {
 
 		const data = response?.data;
 		if (response.status >= 400) {
+			logP3ProviderResponse(
+				"accessinfo (error)",
+				response,
+			);
 			const msg =
 				typeof data === "string"
 					? data
@@ -274,6 +319,10 @@ class Provider3UpstreamService {
 						"accessinfo request failed";
 			throw new Error(msg);
 		}
+		logP3ProviderResponse(
+			"accessinfo",
+			response,
+		);
 		return data;
 	}
 }

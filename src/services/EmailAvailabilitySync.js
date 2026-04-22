@@ -19,6 +19,8 @@ class EmailAvailabilitySync {
 			) || 600000; // 10 minutes default
 		this.isEnabled =
 			process.env.EMAIL_SYNC_ENABLED !== "false";
+		this.verbose =
+			process.env.EMAIL_SYNC_VERBOSE === "true";
 		this.isSyncing = false;
 		this.cronTask = null;
 		// Convert interval to cron expression (every 10 minutes)
@@ -117,9 +119,11 @@ class EmailAvailabilitySync {
 			// Loop through each site
 			for (const site of sites) {
 				try {
-					console.log(
-						`  📧 Fetching counts for ${site.display_name} (${site.name})...`,
-					);
+					if (this.verbose) {
+						console.log(
+							`  📧 Fetching counts for ${site.display_name} (${site.name})...`,
+						);
+					}
 
 					// Call API to get availability for this site
 					const response = await axios.get(
@@ -202,13 +206,17 @@ class EmailAvailabilitySync {
 							totalUpdated++;
 						}
 
-						console.log(
-							`  ✅ Updated counts for ${site.display_name}`,
-						);
+						if (this.verbose) {
+							console.log(
+								`  ✅ Updated counts for ${site.display_name}`,
+							);
+						}
 					} else {
-						console.warn(
-							`  ⚠️  Invalid response for ${site.name}`,
-						);
+						if (this.verbose) {
+							console.warn(
+								`  ⚠️  Invalid response for ${site.name}`,
+							);
+						}
 						totalErrors++;
 					}
 				} catch (siteError) {
