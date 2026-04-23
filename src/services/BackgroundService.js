@@ -159,7 +159,7 @@ class BackgroundService {
 				EmailAvailabilitySync.syncInterval,
 			provider3AccessSyncCron:
 				process.env.PROVIDER3_ACCESS_SYNC_CRON ||
-				"*/30 * * * *",
+				"* * * * *",
 			cacheStats: CacheService.getStats(),
 		};
 	}

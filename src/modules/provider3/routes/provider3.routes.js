@@ -4,6 +4,7 @@ import {
 	findOperatorsForCountryWithFallback,
 	resolveOperatorByIndex,
 	findByServiceAndInterval,
+	getAccessInfoOperatorCountsForConfiguredService,
 } from "../../../repositories/provider3Access.repo.js";
 import {
 	resolveCountryFilterForProvider3,
@@ -433,6 +434,56 @@ export const provider3Route = async (app) => {
 					e,
 					logger,
 					{ route: "provider3.access-sync-all" },
+				);
+			}
+		},
+	});
+
+	app.get("/accessinfo", {
+		handler: async (req, res) => {
+			try {
+				const { serviceCode, interval } =
+					req.query;
+				if (
+					serviceCode === undefined ||
+					serviceCode === null ||
+					String(serviceCode).trim() === ""
+				) {
+					return res.status(400).send({
+						state: "400",
+						error: "serviceCode is required",
+					});
+				}
+				const snapshotInterval =
+					interval != null &&
+					String(interval).trim() !== ""
+						? String(interval).trim()
+						: undefined;
+				const data =
+					await getAccessInfoOperatorCountsForConfiguredService(
+						String(serviceCode),
+						snapshotInterval,
+					);
+				return res.send({
+					state: "200",
+					data,
+				});
+			} catch (e) {
+				const msg = e?.message || String(e);
+				if (
+					msg.includes("serviceCode is required") ||
+					msg.startsWith("Unknown serviceCode:")
+				) {
+					return res.status(400).send({
+						state: "400",
+						error: msg,
+					});
+				}
+				return sendMappedError(
+					res,
+					e,
+					logger,
+					{ route: "provider3.accessinfo" },
 				);
 			}
 		},

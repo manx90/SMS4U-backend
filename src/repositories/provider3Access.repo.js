@@ -1,6 +1,12 @@
 import { AppDataSource } from "../config/database.js";
 import Provider3AccessSnapshot from "../models/Provider3AccessSnapshot.model.js";
 import upstream from "../modules/provider3/services/upstream.service.js";
+import { getAllWithRelations } from "./provider3CountryService.repo.js";
+import { getByCode as getP3ServiceByCode } from "./p3Service.repo.js";
+import {
+	resolveCountryFilterForProvider3,
+	resolveUpstreamServiceNameForP3,
+} from "../utils/provider3Country.js";
 
 const liveAccessCache = new Map();
 const LIVE_ACCESS_TTL_MS = 60_000;
@@ -220,6 +226,80 @@ export const findOperatorsForCountryWithFallback = async (
 		return fromDb;
 	}
 };
+
+/**
+ * لكل دولة مفعّلة في provider3_country_service_config لخدمة معيّنة:
+ * عدد المشغّلين كما في اللقطة/accessinfo (نفس ترتيب get-number عبر findOperatorsForCountryWithFallback).
+ */
+export const getAccessInfoOperatorCountsForConfiguredService =
+	async (serviceCode, interval) => {
+		const sc = String(serviceCode || "").trim();
+		if (!sc) {
+			throw new Error("serviceCode is required");
+		}
+		const svc = await getP3ServiceByCode(sc);
+		if (!svc) {
+			throw new Error(`Unknown serviceCode: ${sc}`);
+		}
+		const intv =
+			interval != null &&
+			String(interval).trim() !== ""
+				? String(interval).trim()
+				: process.env.PROVIDER3_ACCESS_INFO_INTERVAL ||
+					"30min";
+
+		const all = await getAllWithRelations();
+		const configs = all.filter(
+			(r) =>
+				r.p3Service?.id === svc.id && r.p3Country?.id,
+		);
+
+		const byCountryId = new Map();
+		for (const cfg of configs) {
+			const c = cfg.p3Country;
+			if (!c?.id) continue;
+			if (!byCountryId.has(c.id)) {
+				byCountryId.set(c.id, c);
+			}
+		}
+
+		const countries = [];
+		for (const c of byCountryId.values()) {
+			const countryParam =
+				await resolveCountryFilterForProvider3(
+					String(c.id),
+					sc,
+				);
+			const upstreamName =
+				await resolveUpstreamServiceNameForP3(
+					String(c.id),
+					sc,
+				);
+			const ops =
+				await findOperatorsForCountryWithFallback(
+					sc,
+					intv,
+					countryParam,
+					upstreamName,
+				);
+			if (ops.length === 0) continue;
+			countries.push({
+				countryName: c.name,
+				code_country: c.code_country,
+				serverCount: ops.length,
+			});
+		}
+		countries.sort((a, b) =>
+			String(a.countryName || "").localeCompare(
+				String(b.countryName || ""),
+			),
+		);
+
+		return {
+			serviceCode: sc,
+			countries,
+		};
+	};
 
 /**
  * Resolve 1-based index to real operator id for Provider 3 API (same list as findOperatorsForCountry).

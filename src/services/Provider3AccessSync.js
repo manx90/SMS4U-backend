@@ -14,7 +14,7 @@ class Provider3AccessSync {
 			"30min";
 		this.cronExpression =
 			process.env.PROVIDER3_ACCESS_SYNC_CRON ||
-			"*/30 * * * *";
+			"* * * * *";
 		this.isSyncing = false;
 		this.cronTask = null;
 	}
