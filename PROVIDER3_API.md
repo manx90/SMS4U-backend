@@ -54,6 +54,28 @@ third_NUMBER_API_KEY=your_token_here
 
 `GET /api/v1/provider3/pricing-by-country?countryId=` — **`countryId`** = `p3_countries.id`.
 
+## accessinfo حسب الخدمة (عام)
+
+`GET /api/v1/provider3/accessinfo?serviceCode=` — **بدون JWT / apiKey** (مثل الكتالوج العام).
+
+- **إلزامي:** `serviceCode` (كود من `p3_services`).
+- الدول المعادة: **فقط** ما هو مفعّل في إعداد التسعير/الربط لتلك الخدمة، و**فقط** إن وُجدت فتحة واحدة على الأقل لطلب الرقم (`server` 1…N بنفس منطق `get-number`).
+- لكل دولة: `countryName`, `code_country`, **`serverCount`**. **لا** يُعاد `countryId` ولا أي معاملات تقنية إضافية في الاستجابة.
+
+مثال:
+
+```json
+{
+  "state": "200",
+  "data": {
+    "serviceCode": "whatsapp",
+    "countries": [
+      { "countryName": "Pakistan", "code_country": "PK", "serverCount": 3 }
+    ]
+  }
+}
+```
+
 ---
 
 ## ترحيل قاعدة البيانات

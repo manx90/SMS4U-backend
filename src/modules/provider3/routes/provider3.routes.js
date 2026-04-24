@@ -3,7 +3,6 @@ import {
 	replaceSnapshotsForService,
 	findOperatorsForCountryWithFallback,
 	resolveOperatorByIndex,
-	findByServiceAndInterval,
 	getAccessInfoOperatorCountsForConfiguredService,
 } from "../../../repositories/provider3Access.repo.js";
 import {
@@ -442,8 +441,7 @@ export const provider3Route = async (app) => {
 	app.get("/accessinfo", {
 		handler: async (req, res) => {
 			try {
-				const { serviceCode, interval } =
-					req.query;
+				const { serviceCode } = req.query;
 				if (
 					serviceCode === undefined ||
 					serviceCode === null ||
@@ -454,15 +452,10 @@ export const provider3Route = async (app) => {
 						error: "serviceCode is required",
 					});
 				}
-				const snapshotInterval =
-					interval != null &&
-					String(interval).trim() !== ""
-						? String(interval).trim()
-						: undefined;
 				const data =
 					await getAccessInfoOperatorCountsForConfiguredService(
 						String(serviceCode),
-						snapshotInterval,
+						undefined,
 					);
 				return res.send({
 					state: "200",
@@ -485,50 +478,6 @@ export const provider3Route = async (app) => {
 					logger,
 					{ route: "provider3.accessinfo" },
 				);
-			}
-		},
-	});
-
-	app.get("/countries-by-service", {
-		preHandler: requireUser(),
-		handler: async (req, res) => {
-			try {
-				const { serviceCode, interval } =
-					req.query;
-				if (!serviceCode) {
-					return res.status(400).send({
-						state: "400",
-						error:
-							"serviceCode is required",
-					});
-				}
-				const snapshotInterval =
-					interval != null &&
-					String(interval).trim() !== ""
-						? String(interval).trim()
-						: process.env
-								.PROVIDER3_ACCESS_INFO_INTERVAL ||
-							"30min";
-				const rows =
-					await findByServiceAndInterval(
-						String(serviceCode),
-						snapshotInterval,
-					);
-				const data = rows.map((r) => ({
-					country: r.countryName,
-					ccode: r.ccode,
-					accessCount: r.accessCount,
-				}));
-				return res.send({
-					state: "200",
-					data,
-					interval: snapshotInterval,
-				});
-			} catch (e) {
-				return res.status(500).send({
-					state: "500",
-					error: e.message,
-				});
 			}
 		},
 	});

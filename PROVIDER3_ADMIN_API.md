@@ -93,12 +93,13 @@ GET /api/v1/provider3/config/create?countryId=1&serviceId=2&price=1.5&upstreamCo
 | `GET /provider3/catalog/countries` | — يعيد دولاً مميزة تظهر في `provider3_country_service_config` (من `p3_countries`). |
 | `GET /provider3/catalog/services` | **اختياري:** `countryId`. بدون معامل: كل خدمة مع مصفوفة `countries` (الدول المسموحة لها). مع `countryId`: قائمة مسطّحة لخدمات تلك الدولة فقط (كالسلوك السابق). |
 | `GET /provider3/pricing-by-country` | **إلزامي:** `countryId` — معرّف دولة P3؛ قائمة أسعار مبسّطة لخدمات تلك الدولة. |
+| `GET /provider3/accessinfo` | **إلزامي:** `serviceCode` — دول مفعّلة في الإعداد ولديها `serverCount` ≥ 1؛ التفاصيل في `PROVIDER3_API.md` (قسم accessinfo حسب الخدمة). |
 
 ---
 
 ## 6) بقية مسارات المزوّد 3 (مرجع سريع)
 
-راجع أيضاً `PROVIDER3_API_REQUESTS.md` لـ: `get-number`, `get-message`, `operators`, `countries-by-service`, إلخ.
+راجع أيضاً `PROVIDER3_API_REQUESTS.md` لـ: `get-number`, `get-message`, `accessinfo`, إلخ.
 
 ---
 

@@ -28,7 +28,6 @@
 |--------|---------|----------|-------------------|
 | `/provider3/get-message` | GET | مستخدم | **إلزامي:** `apiKey`, `orderId` — للطلبات التي `provider === 3` فقط (بديل مخصص عن `/order/get-message`). |
 | `/provider3/get-number` | GET | مستخدم (`requireUser`) + JWT / `apiKey` | **إلزامي:** `apiKey`, `country`, `serviceCode`, **`server`** (أو `operatorIndex`) — فهرس 1…N حيث N = عدد المشغّلين من `pricing-by-country` (`operatorCount`). **لا** يُقبل `operator` الخام. |
-| `/provider3/countries-by-service` | GET | مستخدم | **إلزامي:** `serviceCode`. **اختياري:** `interval` — قائمة الدول من آخر snapshot (بعد `access-sync`)، **بدون** كشف هوية المشغّل الخام. |
 | `/provider3/pricing-by-country` | GET | عام | **إلزامي:** `countryId` — معرّف **دولة P3** (`p3_countries.id`). يُرجع لكل خدمة **`operatorCount`** لبناء فهرس `server` 1…N |
 | `/provider3/access-sync` | GET | أدمن | **إلزامي:** `serviceCode` (كود من `p3_services`). **اختياري:** `interval`, `serviceName` |
 | `/provider3/access-sync-all` | GET | أدمن | — |
@@ -38,6 +37,7 @@
 | `/provider3/config/remove` | GET | أدمن | **إلزامي:** `id` |
 | `/provider3/catalog/countries` | GET | عام (بدون JWT/apiKey) | — دول P3 تظهر في إعداد P3 فقط |
 | `/provider3/catalog/services` | GET | عام | **اختياري:** `countryId` — بدونه: كل خدمة + `countries[]`؛ معه: خدمات دولة واحدة (قائمة مسطّحة) |
+| `/provider3/accessinfo` | GET | عام (بدون JWT/apiKey) | **إلزامي:** `serviceCode` — لكل دولة مفعّلة في الإعداد ولديها فتحات: `countryName`, `code_country`, **`serverCount`** (لا `countryId`؛ الدول بدون فتحات لا تُعاد) |
 | `/provider3/admin/country-create` | GET | أدمن | **إلزامي:** `country`, `code_country` — إنشاء في **`p3_countries`** |
 | `/provider3/admin/service-create` | GET | أدمن | **إلزامي:** `servicename`, `code` — إنشاء في **`p3_services`** |
 | `/provider3/admin/p3-catalog-countries` | GET | أدمن | — كل صفوف `p3_countries` (لقوائم الإدارة) |
@@ -69,7 +69,7 @@
 | `provider3AccessSyncAll` | GET `/provider3/access-sync-all` (timeout 120s) |
 | `getProvider3Number` | GET `/provider3/get-number` |
 | `getProvider3Message` | GET `/provider3/get-message` |
-| `countriesByService` | GET `/provider3/countries-by-service` |
+| *(إن أُضيفت)* `provider3AccessInfo` | GET `/provider3/accessinfo?serviceCode=` |
 | `configList` | GET `/provider3/config` |
 | `configCreate` | GET `/provider3/config/create` |
 | `configUpdate` | GET `/provider3/config/update` |
